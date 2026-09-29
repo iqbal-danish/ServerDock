@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<source>
+  <publisher>ByteFlow Production Cluster</publisher>
+  <publisherurl>https://byteflow.dev/production</publisherurl>
+  <lastBuildDate>Tue, 29 Sep 2026 21:00:00 GMT</lastBuildDate>
+  <job>
+    <title><![CDATA[Lead Rust Systems Architect]]></title>
+    <date><![CDATA[Tue, 29 Sep 2026 18:30:00 GMT]]></date>
+    <referencenumber><![CDATA[BF-90210]]></referencenumber>
+    <url><![CDATA[https://byteflow.dev/jobs/90210]]></url>
+    <company><![CDATA[ByteFlow Labs]]></company>
+    <city><![CDATA[San Francisco]]></city>
+    <state><![CDATA[CA]]></state>
+    <country><![CDATA[US]]></country>
+    <postalcode><![CDATA[94105]]></postalcode>
+    <location><![CDATA[San Francisco, CA (Remote)]]></location>
+    <salary><![CDATA[$210,000 - $275,000 per year]]></salary>
+    <description><![CDATA[We are looking for a Lead Rust Systems Architect to scale our ultra-high throughput file transfer workspace and large-file indexing engine.]]></description>
+  </job>
+  <job>
+    <title><![CDATA[Staff Frontend Engineer - React & Desktop]]></title>
+    <date><![CDATA[Tue, 29 Sep 2026 17:15:00 GMT]]></date>
+    <referencenumber><![CDATA[BF-90211]]></referencenumber>
+    <url><![CDATA[https://byteflow.dev/jobs/90211]]></url>
+    <company><![CDATA[ByteFlow Labs]]></company>
+    <city><![CDATA[New York]]></city>
+    <state><![CDATA[NY]]></state>
+    <country><![CDATA[US]]></country>
+    <location><![CDATA[New York, NY (Remote)]]></location>
+    <salary><![CDATA[$170,000 - $210,000]]></salary>
+    <description><![CDATA[Build high-performance virtualized data lists, diff viewers, and streaming large-file editors using React 19, TypeScript, and Tailwind CSS.]]></description>
+  </job>
+  <job>
+    <title><![CDATA[Principal Site Reliability Engineer]]></title>
+    <date><![CDATA[Tue, 29 Sep 2026 20:30:00 GMT]]></date>
+    <referencenumber><![CDATA[BF-90299]]></referencenumber>
+    <url><![CDATA[https://byteflow.dev/jobs/90299]]></url>
+    <company><![CDATA[ByteFlow Labs]]></company>
+    <city><![CDATA[San Francisco]]></city>
+    <state><![CDATA[CA]]></state>
+    <country><![CDATA[US]]></country>
+    <location><![CDATA[Remote (Global)]]></location>
+    <salary><![CDATA[$230,000 - $290,000]]></salary>
+    <description><![CDATA[Maintain 99.999% uptime across multi-region high performance SFTP and file sync nodes.]]></description>
+  </job>
+</source>

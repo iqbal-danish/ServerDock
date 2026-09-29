@@ -1,0 +1,58 @@
+{
+  "feed": "ByteFlow Tech Jobs",
+  "version": "1.0",
+  "generated_at": "2026-09-29T20:00:00Z",
+  "jobs": [
+    {
+      "id": "BF-001",
+      "title": "Rust Core Systems Engineer",
+      "department": "Infrastructure",
+      "company": "ByteFlow Systems",
+      "location": {
+        "city": "San Francisco",
+        "country": "USA",
+        "remote": true
+      },
+      "salary": {
+        "min": 190000,
+        "max": 240000,
+        "currency": "USD"
+      },
+      "tags": ["rust", "systems", "tokio", "sftp"]
+    },
+    {
+      "id": "BF-002",
+      "title": "Senior Desktop Engineer",
+      "department": "Client Experience",
+      "company": "ByteFlow Systems",
+      "location": {
+        "city": "London",
+        "country": "UK",
+        "remote": true
+      },
+      "salary": {
+        "min": 150000,
+        "max": 190000,
+        "currency": "GBP"
+      },
+      "tags": ["tauri", "react", "typescript", "tailwind"]
+    },
+    {
+      "id": "BF-003",
+      "title": "Data Pipeline Architect",
+      "department": "Data Platform",
+      "company": "CyberScale Tech",
+      "location": {
+        "city": "Austin",
+        "country": "USA",
+        "remote": false
+      },
+      "salary": {
+        "min": 180000,
+        "max": 220000,
+        "currency": "USD"
+      },
+      "tags": ["xml", "json", "streaming", "data"]
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+[package]
+name = "byteflow"
+version = "0.1.0"
+description = "ByteFlow - High-Performance File Transfer & Large-File Workspace"
+authors = ["Danish Iqbal"]
+edition = "2021"
+
+[lib]
+name = "byteflow_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+russh = "0.49"
+russh-sftp = "2.0"
+rusqlite = { version = "0.32", features = ["bundled"] }
+keyring = { version = "3", features = ["windows-native"] }
+regex = "1.10"
+memmap2 = "0.9"
+chrono = { version = "0.4", features = ["serde"] }
+quick-xml = "0.37"
+similar = "2.6"
+rayon = "1.10"
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
+walkdir = "2"
+thiserror = "2"
+anyhow = "1"
+async-trait = "0.1"
+dirs = "6.0"
+russh-keys = "0.49"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<source version="2.0" generator="ByteFlow Feed Engine">
+  <publisher>ByteFlow Feed System</publisher>
+  <publisherurl>https://byteflow.dev</publisherurl>
+  <lastBuildDate>Tue, 29 Sep 2026 20:00:00 GMT</lastBuildDate>
+  <job id="BF-90210" status="active" type="full-time" remote="true">
+    <title><![CDATA[Senior Rust Systems Engineer]]></title>
+    <date><![CDATA[Tue, 29 Sep 2026 18:30:00 GMT]]></date>
+    <referencenumber><![CDATA[BF-90210]]></referencenumber>
+    <url><![CDATA[https://byteflow.dev/jobs/90210]]></url>
+    <company><![CDATA[ByteFlow Labs]]></company>
+    <category><![CDATA[Engineering]]></category>
+    <city><![CDATA[San Francisco]]></city>
+    <state><![CDATA[CA]]></state>
+    <country><![CDATA[US]]></country>
+    <postalcode><![CDATA[94105]]></postalcode>
+    <location><![CDATA[San Francisco, CA (Remote)]]></location>
+    <salary currency="USD" period="annual"><![CDATA[$180,000 - $240,000 per year]]></salary>
+    <description><![CDATA[We are looking for a Senior Rust Systems Engineer to scale our ultra-high throughput file transfer workspace and large-file indexing engine.]]></description>
+  </job>
+  <job id="BF-90211" status="active" type="full-time" remote="true">
+    <title><![CDATA[Staff Frontend Engineer - React & Desktop]]></title>
+    <date><![CDATA[Tue, 29 Sep 2026 17:15:00 GMT]]></date>
+    <referencenumber><![CDATA[BF-90211]]></referencenumber>
+    <url><![CDATA[https://byteflow.dev/jobs/90211]]></url>
+    <company><![CDATA[ByteFlow Labs]]></company>
+    <city><![CDATA[New York]]></city>
+    <state><![CDATA[NY]]></state>
+    <country><![CDATA[US]]></country>
+    <location><![CDATA[New York, NY (Remote)]]></location>
+    <salary currency="USD" period="annual"><![CDATA[$170,000 - $210,000]]></salary>
+    <description><![CDATA[Build high-performance virtualized data lists, diff viewers, and streaming large-file editors using React 19, TypeScript, and Tailwind CSS.]]></description>
+  </job>
+  <job id="BF-90212" status="active" type="full-time" remote="false">
+    <title><![CDATA[Cloud Infrastructure & Security Architect]]></title>
+    <date><![CDATA[Mon, 28 Sep 2026 12:00:00 GMT]]></date>
+    <referencenumber><![CDATA[BF-90212]]></referencenumber>
+    <url><![CDATA[https://byteflow.dev/jobs/90212]]></url>
+    <company><![CDATA[CyberScale Inc]]></company>
+    <city><![CDATA[Seattle]]></city>
+    <state><![CDATA[WA]]></state>
+    <country><![CDATA[US]]></country>
+    <location><![CDATA[Seattle, WA]]></location>
+    <salary currency="USD" period="annual"><![CDATA[$200,000 - $260,000]]></salary>
+    <description><![CDATA[Architect secure SFTP clusters, OS credential integration, and encrypted storage pipelines.]]></description>
+  </job>
+  <job id="BF-90213" status="active" type="contract" remote="false">
+    <title><![CDATA[Data Feed Analyst]]></title>
+    <date><![CDATA[Sun, 27 Sep 2026 10:00:00 GMT]]></date>
+    <referencenumber><![CDATA[BF-90213]]></referencenumber>
+    <url><![CDATA[https://byteflow.dev/jobs/90213]]></url>
+    <company><![CDATA[CyberScale Inc]]></company>
+    <city><![CDATA[Austin]]></city>
+    <state><![CDATA[TX]]></state>
+    <country><![CDATA[US]]></country>
+    <location><![CDATA[Austin, TX]]></location>
+    <description><![CDATA[Analyze multi-gigabyte XML and JSON job feeds for duplicate detection and taxonomy categorization.]]></description>
+  </job>
+  <job id="BF-90214" status="active" type="full-time" remote="true">
+    <title><![CDATA[Senior Rust Systems Engineer]]></title>
+    <date><![CDATA[Tue, 29 Sep 2026 19:00:00 GMT]]></date>
+    <referencenumber><![CDATA[BF-90214]]></referencenumber>
+    <url><![CDATA[https://byteflow.dev/jobs/90214]]></url>
+    <company><![CDATA[StreamCore Tech]]></company>
+    <city><![CDATA[Chicago]]></city>
+    <state><![CDATA[IL]]></state>
+    <country><![CDATA[US]]></country>
+    <location><![CDATA[Chicago, IL (Remote)]]></location>
+    <salary currency="USD" period="annual"><![CDATA[$190,000 - $230,000]]></salary>
+    <description><![CDATA[Develop low-latency zero-copy file pipelines using Tokio, russh, and memory-mapped virtual page streams.]]></description>
+  </job>
+</source>
