@@ -306,8 +306,8 @@ impl TransferEngine {
         let transferred_atomic = Arc::new(std::sync::atomic::AtomicU64::new(transferred));
         let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        // 16 in-flight pipelined writes
-        let in_flight_concurrency = 16;
+        // 32 in-flight pipelined writes of 32 KB each
+        let in_flight_concurrency = 32;
         let semaphore = Arc::new(tokio::sync::Semaphore::new(in_flight_concurrency));
         let mut write_tasks = tokio::task::JoinSet::new();
 
@@ -356,7 +356,7 @@ impl TransferEngine {
         };
 
         let mut current_offset = transferred;
-        let mut buffer = vec![0u8; 64 * 1024];
+        let mut buffer = vec![0u8; 32 * 1024];
         let mut upload_error: Option<String> = None;
 
         loop {
@@ -516,7 +516,7 @@ impl TransferEngine {
         }
 
         // Dedicated disk writer task on blocking thread pool
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<(u64, Vec<u8>)>(64);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(u64, Vec<u8>)>(128);
         let writer_dest = dest_path.clone();
 
         let writer_handle = tokio::task::spawn_blocking(move || -> Result<(), String> {
@@ -540,9 +540,9 @@ impl TransferEngine {
             Ok(())
         });
 
-        // 32 in-flight pipelined requests of 64 KB each (2 MB sliding window across the wire)
-        let chunk_size: u64 = 64 * 1024;
-        let in_flight_concurrency = 32;
+        // 64 in-flight pipelined requests of 32 KB each (2 MB sliding window across the wire)
+        let chunk_size: u64 = 32 * 1024;
+        let in_flight_concurrency = 64;
         let semaphore = Arc::new(tokio::sync::Semaphore::new(in_flight_concurrency));
 
         let transferred_atomic = Arc::new(std::sync::atomic::AtomicU64::new(item.transferred_bytes));
@@ -598,11 +598,11 @@ impl TransferEngine {
         let mut download_error: Option<String> = None;
 
         // Loop to dispatch pipelined read packets
-        while current_offset < total_size || (total_size == 0 && current_offset == 0) {
+        while current_offset < total_size || (total_size == 0 && !eof_reached.load(std::sync::atomic::Ordering::Relaxed)) {
             if cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
                 break;
             }
-            if eof_reached.load(std::sync::atomic::Ordering::Relaxed) {
+            if total_size == 0 && eof_reached.load(std::sync::atomic::Ordering::Relaxed) {
                 break;
             }
 
@@ -653,30 +653,33 @@ impl TransferEngine {
                     return Ok::<(), String>(());
                 }
 
-                let res = client.read(file_handle.as_str(), offset, read_len as u32).await;
-                match res {
-                    Ok(data) => {
-                        if data.data.is_empty() {
-                            eof.store(true, std::sync::atomic::Ordering::Relaxed);
-                            return Ok(());
+                let mut task_offset = offset;
+                let mut remaining = read_len;
+                while remaining > 0 {
+                    let res = client.read(file_handle.as_str(), task_offset, remaining as u32).await;
+                    match res {
+                        Ok(data) => {
+                            if data.data.is_empty() {
+                                eof.store(true, std::sync::atomic::Ordering::Relaxed);
+                                break;
+                            }
+                            let len = data.data.len();
+                            if tx_clone.send((task_offset, data.data.to_vec())).await.is_err() {
+                                return Err("Disk writer channel closed".to_string());
+                            }
+                            transferred.fetch_add(len as u64, std::sync::atomic::Ordering::Relaxed);
+                            task_offset += len as u64;
+                            remaining = remaining.saturating_sub(len);
                         }
-                        let len = data.data.len();
-                        if tx_clone.send((offset, data.data.to_vec())).await.is_err() {
-                            return Err("Disk writer channel closed".to_string());
-                        }
-                        transferred.fetch_add(len as u64, std::sync::atomic::Ordering::Relaxed);
-                        if len < read_len {
-                            eof.store(true, std::sync::atomic::Ordering::Relaxed);
-                        }
-                        Ok(())
+                        Err(russh_sftp::client::error::Error::Status(status))
+                            if status.status_code == russh_sftp::protocol::StatusCode::Eof => {
+                                eof.store(true, std::sync::atomic::Ordering::Relaxed);
+                                break;
+                            }
+                        Err(e) => return Err(format!("SFTP read error at offset {task_offset}: {e}")),
                     }
-                    Err(russh_sftp::client::error::Error::Status(status))
-                        if status.status_code == russh_sftp::protocol::StatusCode::Eof => {
-                            eof.store(true, std::sync::atomic::Ordering::Relaxed);
-                            Ok(())
-                        }
-                    Err(e) => Err(format!("SFTP read error at offset {offset}: {e}")),
                 }
+                Ok(())
             });
 
             // Drain finished tasks periodically to check for errors and free memory
@@ -741,12 +744,18 @@ impl TransferEngine {
             return Err(e);
         }
 
-        // Ensure final file size matches actual transferred bytes if EOF happened early
+        // Verify all bytes were received if file size was known
         let final_bytes = transferred_atomic.load(std::sync::atomic::Ordering::Relaxed);
         if total_size > 0 && final_bytes < total_size {
-            if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&dest_path) {
-                let _ = file.set_len(final_bytes);
+            let flags = self.paused_or_cancelled.read().await;
+            if let Some(status) = flags.get(&item.id) {
+                if *status == TransferStatus::Paused || *status == TransferStatus::Cancelled {
+                    return Err(format!("Transfer {:?}", status));
+                }
             }
+            return Err(format!(
+                "Incomplete download: received {final_bytes} of {total_size} bytes"
+            ));
         }
 
         Ok(())
