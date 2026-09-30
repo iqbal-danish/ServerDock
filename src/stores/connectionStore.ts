@@ -1,9 +1,12 @@
 import { create } from "zustand";
-import { ConnectionProfile, ConnectionStatus, ConnectionTestResult } from "../types";
+import { ConnectionProfile, ConnectionStatus, ConnectionTestResult, ActiveSessionInfo } from "../types";
 import { api } from "../services/api";
 
 interface ConnectionState {
   profiles: ConnectionProfile[];
+  connectedProfiles: ConnectionProfile[];
+  activeProfileId: string | null;
+  activeSessions: ActiveSessionInfo[];
   status: ConnectionStatus;
   isLoading: boolean;
   isConnecting: boolean;
@@ -27,7 +30,8 @@ interface ConnectionState {
   ) => Promise<ConnectionTestResult>;
   clearTestResult: () => void;
   connect: (profile: ConnectionProfile, password?: string) => Promise<boolean>;
-  disconnect: () => Promise<void>;
+  switchActiveSession: (profileId: string) => Promise<string | null>;
+  disconnect: (profileId?: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
   setSelectedProfileId: (id: string | null) => void;
   clearError: () => void;
@@ -35,6 +39,9 @@ interface ConnectionState {
 
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
   profiles: [],
+  connectedProfiles: [],
+  activeProfileId: null,
+  activeSessions: [],
   status: {
     connected: false,
     current_remote_dir: ".",
@@ -142,7 +149,13 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         profile.remote_dir
       );
 
+      const existing = get().connectedProfiles;
+      const alreadyInList = existing.some((p) => p.id === profile.id);
+      const updatedConnected = alreadyInList ? existing : [...existing, profile];
+
       set({
+        connectedProfiles: updatedConnected,
+        activeProfileId: profile.id,
         status: {
           connected: true,
           profile_id: profile.id,
@@ -153,31 +166,91 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         selectedProfileId: profile.id,
         isConnecting: false,
       });
+
       await get().loadProfiles();
+      await get().refreshStatus();
       return true;
     } catch (e: any) {
       set({
         error: e.toString(),
         isConnecting: false,
-        status: {
-          connected: false,
-          current_remote_dir: ".",
-          error: e.toString(),
-        },
       });
       return false;
     }
   },
 
-  disconnect: async () => {
+  switchActiveSession: async (profileId) => {
     try {
-      await api.disconnectSftp();
+      const path = await api.switchSftpSession(profileId);
+      const profile =
+        get().connectedProfiles.find((p) => p.id === profileId) ||
+        get().profiles.find((p) => p.id === profileId);
+
       set({
+        activeProfileId: profileId,
+        selectedProfileId: profileId,
         status: {
-          connected: false,
-          current_remote_dir: ".",
+          connected: true,
+          profile_id: profileId,
+          host: profile?.host,
+          username: profile?.username,
+          current_remote_dir: path || ".",
         },
       });
+
+      await get().refreshStatus();
+      return path;
+    } catch (e: any) {
+      set({ error: e.toString() });
+      return null;
+    }
+  },
+
+  disconnect: async (profileId) => {
+    try {
+      const targetId = profileId || get().activeProfileId;
+      if (!targetId) {
+        await api.disconnectSftp();
+        set({
+          connectedProfiles: [],
+          activeProfileId: null,
+          status: {
+            connected: false,
+            current_remote_dir: ".",
+          },
+        });
+        return;
+      }
+
+      await api.disconnectSftp(targetId);
+      const remaining = get().connectedProfiles.filter((p) => p.id !== targetId);
+
+      if (remaining.length > 0) {
+        const nextProfile = remaining[remaining.length - 1];
+        const nextPath = await api.switchSftpSession(nextProfile.id).catch(() => ".");
+        set({
+          connectedProfiles: remaining,
+          activeProfileId: nextProfile.id,
+          selectedProfileId: nextProfile.id,
+          status: {
+            connected: true,
+            profile_id: nextProfile.id,
+            host: nextProfile.host,
+            username: nextProfile.username,
+            current_remote_dir: nextPath || ".",
+          },
+        });
+      } else {
+        set({
+          connectedProfiles: [],
+          activeProfileId: null,
+          status: {
+            connected: false,
+            current_remote_dir: ".",
+          },
+        });
+      }
+      await get().refreshStatus();
     } catch (e: any) {
       set({ error: e.toString() });
     }
@@ -186,7 +259,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   refreshStatus: async () => {
     try {
       const status = await api.getConnectionStatus();
-      set({ status });
+      const activeSessions = await api.getActiveSessions().catch(() => []);
+      set({ status, activeSessions });
     } catch (e) {
       // ignore
     }

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { X, Server } from "lucide-react";
 import { PaneHeader } from "./PaneHeader";
 import { VirtualizedFileList } from "./VirtualizedFileList";
 import { FileContextMenu } from "./FileContextMenu";
@@ -46,13 +47,37 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({ onSwitchTab }) => {
     refreshRemote,
     toggleRemoteSelected,
     setRemoteSearchQuery,
+    switchRemoteServer,
+    closeRemoteServer,
   } = useFileStore();
 
-  const { status } = useConnectionStore();
+  const {
+    status,
+    connectedProfiles,
+    activeProfileId,
+    switchActiveSession,
+    disconnect,
+  } = useConnectionStore();
   const { queueUpload, queueDownload } = useTransferStore();
   const { openFile } = useEditorStore();
   const { setFileA } = useDiffStore();
   const [uploadModalItems, setUploadModalItems] = useState<FileItem[]>([]);
+
+  const activeProfile = connectedProfiles.find((p) => p.id === activeProfileId);
+
+  const handleSwitchServer = async (profileId: string) => {
+    const newPath = await switchActiveSession(profileId);
+    await switchRemoteServer(profileId, newPath || undefined);
+  };
+
+  const handleDisconnectServer = async (profileId: string) => {
+    closeRemoteServer(profileId);
+    await disconnect(profileId);
+    const nextActiveId = useConnectionStore.getState().activeProfileId;
+    if (nextActiveId) {
+      await switchRemoteServer(nextActiveId);
+    }
+  };
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [splitPercent, setSplitPercent] = useState<number>(50);
@@ -356,8 +381,42 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({ onSwitchTab }) => {
         }}
         className="flex flex-col overflow-hidden relative min-w-[200px]"
       >
+        {/* MULTI-SERVER TABS BAR */}
+        {connectedProfiles.length > 0 && (
+          <div className="h-8 bg-[#161b22] border-b border-[#30363d] flex items-center px-1 overflow-x-auto scrollbar-none select-none">
+            {connectedProfiles.map((p) => {
+              const isActive = activeProfileId === p.id;
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => handleSwitchServer(p.id)}
+                  className={`group h-7 px-2.5 mx-0.5 rounded-t flex items-center space-x-1.5 text-xs cursor-pointer border-t-2 transition-all ${
+                    isActive
+                      ? "bg-[#0d1117] text-white border-blue-500 font-medium shadow-sm"
+                      : "bg-[#21262d]/40 text-[#8b949e] border-transparent hover:text-white hover:bg-[#21262d]"
+                  }`}
+                  title={`${p.name} (${p.host}:${p.port})`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                  <span className="max-w-[120px] truncate text-[11px]">{p.name || p.host}</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDisconnectServer(p.id);
+                    }}
+                    title={`Disconnect ${p.name || p.host}`}
+                    className="p-0.5 rounded hover:bg-[#30363d] text-[#6e7681] hover:text-red-400 transition-colors ml-1"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <PaneHeader
-          title="Remote Files"
+          title={activeProfile ? `${activeProfile.name}` : "Remote Files"}
           isRemote={true}
           currentPath={remotePath}
           onNavigate={(p) => loadRemoteDirectory(p, true)}
@@ -367,7 +426,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({ onSwitchTab }) => {
           onRefresh={refreshRemote}
           onCreateFolder={(name) => {
             const dest = remotePath.endsWith("/") ? `${remotePath}${name}` : `${remotePath}/${name}`;
-            api.createRemoteDirectory(dest).then(() => refreshRemote());
+            api.createRemoteDirectory(dest, activeProfileId || undefined).then(() => refreshRemote());
           }}
           searchQuery={remoteSearchQuery}
           onSearchChange={setRemoteSearchQuery}

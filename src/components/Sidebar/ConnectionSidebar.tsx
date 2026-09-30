@@ -30,9 +30,12 @@ export const ConnectionSidebar: React.FC<ConnectionSidebarProps> = ({
   const {
     profiles,
     status,
+    connectedProfiles,
+    activeProfileId,
     isConnecting,
     selectedProfileId,
     connect,
+    switchActiveSession,
     disconnect,
     deleteProfile,
     deleteSavedPassword,
@@ -41,7 +44,7 @@ export const ConnectionSidebar: React.FC<ConnectionSidebarProps> = ({
     setSelectedProfileId,
   } = useConnectionStore();
 
-  const { loadRemoteDirectory } = useFileStore();
+  const { loadRemoteDirectory, switchRemoteServer, closeRemoteServer } = useFileStore();
   const { setIsOpen: setLogConsoleOpen } = useLogStore();
 
   const [passwordModalProfile, setPasswordModalProfile] = useState<ConnectionProfile | null>(null);
@@ -51,9 +54,16 @@ export const ConnectionSidebar: React.FC<ConnectionSidebarProps> = ({
     setSelectedProfileId(profile.id);
     setConnectError(null);
 
+    // If already connected, switch focus to it
+    if (connectedProfiles.some((p) => p.id === profile.id)) {
+      const newPath = await switchActiveSession(profile.id);
+      await switchRemoteServer(profile.id, newPath || undefined);
+      return;
+    }
+
     const success = await connect(profile);
     if (success) {
-      loadRemoteDirectory(profile.remote_dir || ".");
+      await switchRemoteServer(profile.id, profile.remote_dir || ".");
     } else {
       const err = useConnectionStore.getState().error || "Failed to establish SFTP connection.";
       setLogConsoleOpen(true);
@@ -86,7 +96,7 @@ export const ConnectionSidebar: React.FC<ConnectionSidebarProps> = ({
 
     const success = await connect(profile, password);
     if (success) {
-      loadRemoteDirectory(profile.remote_dir || ".");
+      await switchRemoteServer(profile.id, profile.remote_dir || ".");
     } else {
       const err = useConnectionStore.getState().error || "Password was not accepted by server.";
       setConnectError({
@@ -94,6 +104,15 @@ export const ConnectionSidebar: React.FC<ConnectionSidebarProps> = ({
         message: err,
       });
       setLogConsoleOpen(true);
+    }
+  };
+
+  const handleDisconnect = async (profileId: string) => {
+    closeRemoteServer(profileId);
+    await disconnect(profileId);
+    const nextActiveId = useConnectionStore.getState().activeProfileId;
+    if (nextActiveId) {
+      await switchRemoteServer(nextActiveId);
     }
   };
 
@@ -124,18 +143,24 @@ export const ConnectionSidebar: React.FC<ConnectionSidebarProps> = ({
           </div>
         ) : (
           profiles.map((profile) => {
-            const isConnected =
-              status.connected && status.profile_id === profile.id;
-            const isThisConnecting =
-              isConnecting && selectedProfileId === profile.id;
+            const isConnected = connectedProfiles.some((p) => p.id === profile.id);
+            const isActive = isConnected && activeProfileId === profile.id;
+            const isThisConnecting = isConnecting && selectedProfileId === profile.id;
 
             return (
               <div
                 key={profile.id}
-                onClick={() => setSelectedProfileId(profile.id)}
+                onClick={() => {
+                  setSelectedProfileId(profile.id);
+                  if (isConnected && !isActive) {
+                    handleConnect(profile);
+                  }
+                }}
                 className={`group p-2.5 rounded-md border text-xs cursor-pointer transition-all ${
-                  selectedProfileId === profile.id
-                    ? "bg-[#21262d] border-blue-500/50 shadow-sm"
+                  isActive
+                    ? "bg-[#21262d] border-blue-500 shadow-sm"
+                    : selectedProfileId === profile.id
+                    ? "bg-[#21262d]/80 border-blue-500/50 shadow-sm"
                     : "bg-[#0d1117]/50 border-transparent hover:border-[#30363d] hover:bg-[#21262d]/50"
                 }`}
               >
@@ -145,7 +170,7 @@ export const ConnectionSidebar: React.FC<ConnectionSidebarProps> = ({
                     {isConnected ? (
                       <span
                         className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm flex-shrink-0"
-                        title="Connected"
+                        title={isActive ? "Connected (Active)" : "Connected"}
                       />
                     ) : isThisConnecting ? (
                       <span
@@ -196,16 +221,34 @@ export const ConnectionSidebar: React.FC<ConnectionSidebarProps> = ({
 
                   <div className="flex items-center space-x-1 opacity-80 group-hover:opacity-100">
                     {isConnected ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          disconnect();
-                        }}
-                        className="p-1 rounded text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                        title="Disconnect"
-                      >
-                        <PowerOff className="w-3 h-3" />
-                      </button>
+                      <div className="flex items-center space-x-1">
+                        {isActive ? (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                            Active
+                          </span>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleConnect(profile);
+                            }}
+                            className="px-2 py-0.5 rounded text-[10px] font-medium bg-[#30363d] hover:bg-blue-600 text-white transition-colors"
+                            title="Switch active view to this server"
+                          >
+                            Switch
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDisconnect(profile.id);
+                          }}
+                          className="p-1 rounded text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                          title="Disconnect this server"
+                        >
+                          <PowerOff className="w-3 h-3" />
+                        </button>
+                      </div>
                     ) : (
                       <button
                         disabled={isConnecting}

@@ -22,6 +22,14 @@ export interface ConnectionStatus {
   error?: string;
 }
 
+export interface ActiveSessionInfo {
+  profile_id: string;
+  host: string;
+  username: string;
+  current_remote_dir: string;
+  is_active: boolean;
+}
+
 export interface TestStep {
   title: string;
   status: "success" | "failed" | "pending";

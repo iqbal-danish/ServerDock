@@ -173,9 +173,27 @@ pub async fn clear_connection_logs(state: State<'_, Arc<AppState>>) -> Result<()
 }
 
 #[tauri::command]
-pub async fn disconnect_sftp(state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    state.sftp.disconnect().await;
+pub async fn disconnect_sftp(
+    state: State<'_, Arc<AppState>>,
+    profile_id: Option<String>,
+) -> Result<(), String> {
+    state.sftp.disconnect(profile_id.as_deref()).await;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn switch_sftp_session(
+    state: State<'_, Arc<AppState>>,
+    profile_id: String,
+) -> Result<String, String> {
+    state.sftp.switch_session(&profile_id).await
+}
+
+#[tauri::command]
+pub async fn get_active_sessions(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<ActiveSessionInfo>, String> {
+    Ok(state.sftp.list_active_sessions().await)
 }
 
 #[tauri::command]
@@ -185,7 +203,7 @@ pub async fn exit_app(
 ) -> Result<(), String> {
     let _ = tokio::time::timeout(std::time::Duration::from_millis(800), async {
         state.transfers.shutdown().await;
-        state.sftp.disconnect().await;
+        state.sftp.disconnect(None).await;
     })
     .await;
 
@@ -226,9 +244,10 @@ pub async fn list_local_directory(path: String) -> Result<Vec<FileItem>, String>
 pub async fn list_remote_directory(
     state: State<'_, Arc<AppState>>,
     path: String,
+    profile_id: Option<String>,
     force_refresh: Option<bool>,
 ) -> Result<Vec<FileItem>, String> {
-    state.sftp.list_directory(&path, force_refresh.unwrap_or(false)).await
+    state.sftp.list_directory(&path, profile_id.as_deref(), force_refresh.unwrap_or(false)).await
 }
 
 #[tauri::command]
@@ -240,8 +259,9 @@ pub async fn create_local_directory(path: String) -> Result<(), String> {
 pub async fn create_remote_directory(
     state: State<'_, Arc<AppState>>,
     path: String,
+    profile_id: Option<String>,
 ) -> Result<(), String> {
-    state.sftp.create_directory(&path).await
+    state.sftp.create_directory(&path, profile_id.as_deref()).await
 }
 
 #[tauri::command]
@@ -254,8 +274,9 @@ pub async fn delete_remote_file(
     state: State<'_, Arc<AppState>>,
     path: String,
     is_dir: bool,
+    profile_id: Option<String>,
 ) -> Result<(), String> {
-    state.sftp.delete_file(&path, is_dir).await
+    state.sftp.delete_file(&path, is_dir, profile_id.as_deref()).await
 }
 
 #[tauri::command]
@@ -268,8 +289,9 @@ pub async fn rename_remote_file(
     state: State<'_, Arc<AppState>>,
     old_path: String,
     new_path: String,
+    profile_id: Option<String>,
 ) -> Result<(), String> {
-    state.sftp.rename(&old_path, &new_path).await
+    state.sftp.rename(&old_path, &new_path, profile_id.as_deref()).await
 }
 
 #[tauri::command]
@@ -391,8 +413,9 @@ pub async fn read_remote_chunk(
     path: String,
     offset: u64,
     length: usize,
+    profile_id: Option<String>,
 ) -> Result<FileChunkResponse, String> {
-    let bytes = state.sftp.read_file_chunk(&path, offset, length).await?;
+    let bytes = state.sftp.read_file_chunk(&path, offset, length, profile_id.as_deref()).await?;
     let content = String::from_utf8_lossy(&bytes).to_string();
     let chunk_size = bytes.len();
     Ok(FileChunkResponse {

@@ -25,7 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   openSettings,
 }) => {
-  const { status, disconnect } = useConnectionStore();
+  const { status, connectedProfiles, disconnect } = useConnectionStore();
   const { transfers, isOpen, setIsOpen } = useTransferStore();
   const { logs, isOpen: isLogOpen, toggleOpen: toggleLogOpen } = useLogStore();
 
@@ -98,9 +98,14 @@ export const Header: React.FC<HeaderProps> = ({
                 {status.username ? `${status.username}@` : ""}
                 {status.host}
               </span>
+              {connectedProfiles.length > 1 && (
+                <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30">
+                  +{connectedProfiles.length - 1} more
+                </span>
+              )}
               <button
                 onClick={() => disconnect()}
-                title="Disconnect from server"
+                title="Disconnect all servers"
                 className="text-red-400 hover:text-red-300 ml-1 p-0.5"
               >
                 <PowerOff className="w-3.5 h-3.5" />

@@ -27,14 +27,15 @@ impl Handler for ClientHandler {
 pub struct ActiveSftpConnection {
     pub client: Arc<SftpSession>,
     pub remote_path: String,
+    pub profile_id: String,
+    pub host: String,
+    pub username: String,
 }
 
 #[derive(Clone)]
 pub struct SftpManager {
-    session: Arc<Mutex<Option<ActiveSftpConnection>>>,
-    current_profile_id: Arc<Mutex<Option<String>>>,
-    current_host: Arc<Mutex<Option<String>>>,
-    current_username: Arc<Mutex<Option<String>>>,
+    sessions: Arc<Mutex<HashMap<String, ActiveSftpConnection>>>,
+    active_profile_id: Arc<Mutex<Option<String>>>,
     dir_cache: Arc<Mutex<HashMap<String, (Instant, Vec<FileItem>)>>>,
     logger: Arc<std::sync::RwLock<Option<crate::logger::Logger>>>,
 }
@@ -42,10 +43,8 @@ pub struct SftpManager {
 impl SftpManager {
     pub fn new() -> Self {
         Self {
-            session: Arc::new(Mutex::new(None)),
-            current_profile_id: Arc::new(Mutex::new(None)),
-            current_host: Arc::new(Mutex::new(None)),
-            current_username: Arc::new(Mutex::new(None)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            active_profile_id: Arc::new(Mutex::new(None)),
             dir_cache: Arc::new(Mutex::new(HashMap::new())),
             logger: Arc::new(std::sync::RwLock::new(None)),
         }
@@ -67,29 +66,97 @@ impl SftpManager {
     }
 
     pub async fn is_connected(&self) -> bool {
-        self.session.lock().await.is_some()
+        !self.sessions.lock().await.is_empty()
     }
 
     pub async fn get_current_info(&self) -> (Option<String>, Option<String>, Option<String>) {
-        (
-            self.current_profile_id.lock().await.clone(),
-            self.current_host.lock().await.clone(),
-            self.current_username.lock().await.clone(),
-        )
+        let active = self.active_profile_id.lock().await;
+        if let Some(ref pid) = *active {
+            let sessions = self.sessions.lock().await;
+            if let Some(conn) = sessions.get(pid) {
+                return (Some(conn.profile_id.clone()), Some(conn.host.clone()), Some(conn.username.clone()));
+            }
+        }
+        (None, None, None)
     }
 
-    pub async fn disconnect(&self) {
-        let mut sess = self.session.lock().await;
-        *sess = None;
-        *self.current_profile_id.lock().await = None;
-        *self.current_host.lock().await = None;
-        *self.current_username.lock().await = None;
-        self.dir_cache.lock().await.clear();
-        self.log("INFO", "SFTP", "Disconnected session cleanly.").await;
+    pub async fn list_active_sessions(&self) -> Vec<crate::types::ActiveSessionInfo> {
+        let sessions = self.sessions.lock().await;
+        let active = self.active_profile_id.lock().await;
+        let active_id = active.as_deref();
+
+        sessions
+            .values()
+            .map(|conn| crate::types::ActiveSessionInfo {
+                profile_id: conn.profile_id.clone(),
+                host: conn.host.clone(),
+                username: conn.username.clone(),
+                current_remote_dir: conn.remote_path.clone(),
+                is_active: active_id == Some(&conn.profile_id),
+            })
+            .collect()
+    }
+
+    pub async fn switch_session(&self, profile_id: &str) -> Result<String, String> {
+        let sessions = self.sessions.lock().await;
+        if let Some(conn) = sessions.get(profile_id) {
+            let mut active = self.active_profile_id.lock().await;
+            *active = Some(profile_id.to_string());
+            let path = conn.remote_path.clone();
+            self.log("INFO", "SFTP", &format!("Switched active session to profile '{profile_id}' at '{path}'.")).await;
+            Ok(path)
+        } else {
+            Err(format!("No active session found for profile '{profile_id}'"))
+        }
+    }
+
+    pub async fn disconnect(&self, profile_id: Option<&str>) {
+        let mut sessions = self.sessions.lock().await;
+        let mut active = self.active_profile_id.lock().await;
+
+        if let Some(pid) = profile_id {
+            sessions.remove(pid);
+            if active.as_deref() == Some(pid) {
+                *active = sessions.keys().next().cloned();
+            }
+            self.log("INFO", "SFTP", &format!("Disconnected session for profile '{pid}'.")).await;
+        } else {
+            sessions.clear();
+            *active = None;
+            self.log("INFO", "SFTP", "Disconnected all SFTP sessions.").await;
+        }
+
+        let mut cache = self.dir_cache.lock().await;
+        if let Some(pid) = profile_id {
+            cache.retain(|k, _| !k.starts_with(pid));
+        } else {
+            cache.clear();
+        }
     }
 
     pub async fn clear_dir_cache(&self) {
-        self.dir_cache.lock().await.clear();
+        self.clear_dir_cache_for(None).await;
+    }
+
+    pub async fn clear_dir_cache_for(&self, profile_id: Option<&str>) {
+        let mut cache = self.dir_cache.lock().await;
+        if let Some(pid) = profile_id {
+            cache.retain(|k, _| !k.starts_with(pid));
+        } else {
+            cache.clear();
+        }
+    }
+
+    pub async fn get_client_and_key(&self, profile_id: Option<&str>) -> Result<(Arc<SftpSession>, String), String> {
+        let sessions = self.sessions.lock().await;
+        let active = self.active_profile_id.lock().await;
+
+        let key = profile_id
+            .or_else(|| active.as_deref())
+            .ok_or("Not connected to any SFTP server")?;
+
+        let conn = sessions.get(key).ok_or_else(|| format!("No active connection for '{key}'"))?;
+        Ok((Arc::clone(&conn.client), key.to_string()))
     }
 
     pub async fn test_connection(
@@ -406,24 +473,33 @@ impl SftpManager {
         };
 
         let default_dir = initial_dir.unwrap_or(".").to_string();
+        let session_key = profile_id.clone().unwrap_or_else(|| format!("{}:{}", host, port));
 
-        let mut current_sess = self.session.lock().await;
-        *current_sess = Some(ActiveSftpConnection {
-            client: Arc::new(sftp),
-            remote_path: default_dir.clone(),
-        });
+        {
+            let mut sessions = self.sessions.lock().await;
+            sessions.insert(
+                session_key.clone(),
+                ActiveSftpConnection {
+                    client: Arc::new(sftp),
+                    remote_path: default_dir.clone(),
+                    profile_id: session_key.clone(),
+                    host: host.to_string(),
+                    username: username.to_string(),
+                },
+            );
+        }
 
-        *self.current_profile_id.lock().await = profile_id;
-        *self.current_host.lock().await = Some(host.to_string());
-        *self.current_username.lock().await = Some(username.to_string());
-        self.dir_cache.lock().await.clear();
+        {
+            let mut active = self.active_profile_id.lock().await;
+            *active = Some(session_key.clone());
+        }
 
-        self.log("SUCCESS", "SFTP", &format!("SFTP connection established. Ready at '{default_dir}'.")).await;
+        self.log("SUCCESS", "SFTP", &format!("SFTP connection established for '{session_key}'. Ready at '{default_dir}'.")).await;
 
         Ok(default_dir)
     }
 
-    pub async fn list_directory(&self, path: &str, force_refresh: bool) -> Result<Vec<FileItem>, String> {
+    pub async fn list_directory(&self, path: &str, profile_id: Option<&str>, force_refresh: bool) -> Result<Vec<FileItem>, String> {
         let clean_path = path.replace('\\', "/");
         let norm_path = if clean_path.is_empty() || clean_path == "." {
             "."
@@ -431,21 +507,18 @@ impl SftpManager {
             clean_path.trim_end_matches('/')
         };
 
+        let (client, session_key) = self.get_client_and_key(profile_id).await?;
+        let cache_key = format!("{session_key}:{norm_path}");
+
         // Check cache if not forcing refresh
         if !force_refresh {
             let cache = self.dir_cache.lock().await;
-            if let Some((timestamp, items)) = cache.get(norm_path) {
+            if let Some((timestamp, items)) = cache.get(&cache_key) {
                 if timestamp.elapsed() < std::time::Duration::from_secs(30) {
                     return Ok(items.clone());
                 }
             }
         }
-
-        let client = {
-            let sess_guard = self.session.lock().await;
-            let sess = sess_guard.as_ref().ok_or("Not connected to SFTP server")?;
-            Arc::clone(&sess.client)
-        };
 
         let target_dir = if norm_path == "." { "." } else { norm_path };
         let read_dir = client
@@ -512,34 +585,34 @@ impl SftpManager {
         // Cache the result
         {
             let mut cache = self.dir_cache.lock().await;
-            cache.insert(norm_path.to_string(), (Instant::now(), items.clone()));
+            cache.insert(cache_key, (Instant::now(), items.clone()));
+        }
+
+        // Update current remote path for session
+        {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(conn) = sessions.get_mut(&session_key) {
+                conn.remote_path = norm_path.to_string();
+            }
         }
 
         Ok(items)
     }
 
-    pub async fn create_directory(&self, path: &str) -> Result<(), String> {
+    pub async fn create_directory(&self, path: &str, profile_id: Option<&str>) -> Result<(), String> {
         let clean = path.replace('\\', "/");
-        let client = {
-            let sess_guard = self.session.lock().await;
-            let sess = sess_guard.as_ref().ok_or("Not connected to SFTP server")?;
-            Arc::clone(&sess.client)
-        };
+        let (client, session_key) = self.get_client_and_key(profile_id).await?;
         client
             .create_dir(&clean)
             .await
             .map_err(|e| format!("Failed to create remote directory {clean}: {e}"))?;
-        self.dir_cache.lock().await.clear();
+        self.clear_dir_cache_for(Some(&session_key)).await;
         Ok(())
     }
 
-    pub async fn delete_file(&self, path: &str, is_dir: bool) -> Result<(), String> {
+    pub async fn delete_file(&self, path: &str, is_dir: bool, profile_id: Option<&str>) -> Result<(), String> {
         let clean = path.replace('\\', "/");
-        let client = {
-            let sess_guard = self.session.lock().await;
-            let sess = sess_guard.as_ref().ok_or("Not connected to SFTP server")?;
-            Arc::clone(&sess.client)
-        };
+        let (client, session_key) = self.get_client_and_key(profile_id).await?;
         let res = if is_dir {
             client
                 .remove_dir(&clean)
@@ -551,35 +624,27 @@ impl SftpManager {
                 .await
                 .map_err(|e| format!("Failed to remove remote file {clean}: {e}"))
         };
-        self.dir_cache.lock().await.clear();
+        self.clear_dir_cache_for(Some(&session_key)).await;
         res
     }
 
-    pub async fn rename(&self, old_path: &str, new_path: &str) -> Result<(), String> {
+    pub async fn rename(&self, old_path: &str, new_path: &str, profile_id: Option<&str>) -> Result<(), String> {
         let clean_old = old_path.replace('\\', "/");
         let clean_new = new_path.replace('\\', "/");
-        let client = {
-            let sess_guard = self.session.lock().await;
-            let sess = sess_guard.as_ref().ok_or("Not connected to SFTP server")?;
-            Arc::clone(&sess.client)
-        };
+        let (client, session_key) = self.get_client_and_key(profile_id).await?;
         let res = client
             .rename(&clean_old, &clean_new)
             .await
             .map_err(|e| format!("Failed to rename remote file: {e}"));
-        self.dir_cache.lock().await.clear();
+        self.clear_dir_cache_for(Some(&session_key)).await;
         res
     }
 
-    pub async fn read_file_chunk(&self, path: &str, offset: u64, length: usize) -> Result<Vec<u8>, String> {
+    pub async fn read_file_chunk(&self, path: &str, offset: u64, length: usize, profile_id: Option<&str>) -> Result<Vec<u8>, String> {
         use tokio::io::AsyncReadExt;
         use tokio::io::AsyncSeekExt;
         let clean = path.replace('\\', "/");
-        let client = {
-            let sess_guard = self.session.lock().await;
-            let sess = sess_guard.as_ref().ok_or("Not connected to SFTP server")?;
-            Arc::clone(&sess.client)
-        };
+        let (client, _) = self.get_client_and_key(profile_id).await?;
 
         let mut file = client
             .open(&clean)
@@ -601,8 +666,11 @@ impl SftpManager {
     }
 
     pub async fn get_sftp_client(&self) -> Result<Arc<SftpSession>, String> {
-        let sess_guard = self.session.lock().await;
-        let sess = sess_guard.as_ref().ok_or("Not connected to SFTP server")?;
-        Ok(Arc::clone(&sess.client))
+        self.get_sftp_client_for(None).await
+    }
+
+    pub async fn get_sftp_client_for(&self, profile_id: Option<&str>) -> Result<Arc<SftpSession>, String> {
+        let (client, _) = self.get_client_and_key(profile_id).await?;
+        Ok(client)
     }
 }

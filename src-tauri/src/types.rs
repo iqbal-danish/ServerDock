@@ -28,6 +28,15 @@ pub struct ConnectionStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveSessionInfo {
+    pub profile_id: String,
+    pub host: String,
+    pub username: String,
+    pub current_remote_dir: String,
+    pub is_active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionTestResult {
     pub success: bool,
     pub steps: Vec<TestStep>,

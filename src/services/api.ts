@@ -3,6 +3,7 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import {
   ConnectionProfile,
   ConnectionStatus,
+  ActiveSessionInfo,
   ConnectionTestResult,
   FileItem,
   TransferItem,
@@ -61,7 +62,9 @@ export const api = {
       keyPath,
       remoteDir,
     }),
-  disconnectSftp: () => invoke<void>("disconnect_sftp"),
+  disconnectSftp: (profileId?: string) => invoke<void>("disconnect_sftp", { profileId }),
+  switchSftpSession: (profileId: string) => invoke<string>("switch_sftp_session", { profileId }),
+  getActiveSessions: () => invoke<ActiveSessionInfo[]>("get_active_sessions"),
   exitApp: () => invoke<void>("exit_app"),
   getConnectionStatus: () => invoke<ConnectionStatus>("get_connection_status"),
   getConnectionLogs: () => invoke<LogEntry[]>("get_connection_logs"),
@@ -79,14 +82,14 @@ export const api = {
   calculateLocalChecksum: (path: string) =>
     invoke<string>("calculate_local_checksum", { path }),
 
-  listRemoteDirectory: (path: string, forceRefresh?: boolean) =>
-    invoke<FileItem[]>("list_remote_directory", { path, forceRefresh: forceRefresh ?? false }),
-  createRemoteDirectory: (path: string) =>
-    invoke<void>("create_remote_directory", { path }),
-  deleteRemoteFile: (path: string, isDir: boolean) =>
-    invoke<void>("delete_remote_file", { path, isDir }),
-  renameRemoteFile: (oldPath: string, newPath: string) =>
-    invoke<void>("rename_remote_file", { oldPath, newPath }),
+  listRemoteDirectory: (path: string, profileId?: string, forceRefresh?: boolean) =>
+    invoke<FileItem[]>("list_remote_directory", { path, profileId, forceRefresh: forceRefresh ?? false }),
+  createRemoteDirectory: (path: string, profileId?: string) =>
+    invoke<void>("create_remote_directory", { path, profileId }),
+  deleteRemoteFile: (path: string, isDir: boolean, profileId?: string) =>
+    invoke<void>("delete_remote_file", { path, isDir, profileId }),
+  renameRemoteFile: (oldPath: string, newPath: string, profileId?: string) =>
+    invoke<void>("rename_remote_file", { oldPath, newPath, profileId }),
 
   // Transfers
   queueTransfer: (
@@ -127,8 +130,8 @@ export const api = {
     invoke<FileChunkResponse>("read_file_lines", { path, startLine, lineCount }),
   readFileChunk: (path: string, offset: number, length: number) =>
     invoke<FileChunkResponse>("read_file_chunk", { path, offset, length }),
-  readRemoteChunk: (path: string, offset: number, length: number) =>
-    invoke<FileChunkResponse>("read_remote_chunk", { path, offset, length }),
+  readRemoteChunk: (path: string, offset: number, length: number, profileId?: string) =>
+    invoke<FileChunkResponse>("read_remote_chunk", { path, offset, length, profileId }),
   saveLocalFile: (path: string, content: string) =>
     invoke<void>("save_local_file", { path, content }),
   formatXml: (rawXml: string) => invoke<string>("format_xml", { rawXml }),

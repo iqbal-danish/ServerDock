@@ -1,6 +1,18 @@
 import { create } from "zustand";
 import { FileItem } from "../types";
 import { api } from "../services/api";
+import { useConnectionStore } from "./connectionStore";
+
+export interface ServerPaneState {
+  remotePath: string;
+  remoteFiles: FileItem[];
+  remoteHistory: string[];
+  remoteHistoryIndex: number;
+  remoteLoading: boolean;
+  remoteError: string | null;
+  remoteSelected: string[];
+  remoteSearchQuery: string;
+}
 
 interface FileState {
   // Local Pane
@@ -23,6 +35,10 @@ interface FileState {
   remoteSelected: string[];
   remoteSearchQuery: string;
 
+  // Multi-server pane storage
+  serverPanes: Record<string, ServerPaneState>;
+  activeServerId: string | null;
+
   // Active Pane
   activePane: "local" | "remote";
   setActivePane: (pane: "local" | "remote") => void;
@@ -38,7 +54,13 @@ interface FileState {
   toggleLocalSelected: (path: string, multi: boolean, range?: boolean) => void;
   setLocalSearchQuery: (query: string) => void;
 
-  loadRemoteDirectory: (path: string, pushHistory?: boolean, forceRefresh?: boolean) => Promise<void>;
+  // Remote Actions
+  loadRemoteDirectory: (
+    path: string,
+    pushHistory?: boolean,
+    forceRefresh?: boolean,
+    targetProfileId?: string
+  ) => Promise<void>;
   navigateRemoteBack: () => void;
   navigateRemoteForward: () => void;
   navigateRemoteUp: () => void;
@@ -46,6 +68,8 @@ interface FileState {
   setRemoteSelected: (paths: string[]) => void;
   toggleRemoteSelected: (path: string, multi: boolean, range?: boolean) => void;
   setRemoteSearchQuery: (query: string) => void;
+  switchRemoteServer: (profileId: string, initialPath?: string) => Promise<void>;
+  closeRemoteServer: (profileId: string) => void;
 }
 
 export const useFileStore = create<FileState>((set, get) => ({
@@ -66,6 +90,9 @@ export const useFileStore = create<FileState>((set, get) => ({
   remoteError: null,
   remoteSelected: [],
   remoteSearchQuery: "",
+
+  serverPanes: {},
+  activeServerId: null,
 
   activePane: "local",
   setActivePane: (pane) => set({ activePane: pane }),
@@ -175,11 +202,18 @@ export const useFileStore = create<FileState>((set, get) => ({
   setLocalSearchQuery: (query) => set({ localSearchQuery: query }),
 
   // Remote Actions
-  loadRemoteDirectory: async (path: string, pushHistory = true, forceRefresh = false) => {
+  loadRemoteDirectory: async (
+    path: string,
+    pushHistory = true,
+    forceRefresh = false,
+    targetProfileId?: string
+  ) => {
     const cleanPath = path.replace(/\\/g, "/");
+    const activeId = targetProfileId || get().activeServerId || useConnectionStore.getState().activeProfileId || undefined;
+
     try {
       set({ remoteLoading: true, remoteError: null, remoteSelected: [] });
-      const files = await api.listRemoteDirectory(cleanPath, forceRefresh);
+      const files = await api.listRemoteDirectory(cleanPath, activeId, forceRefresh);
 
       let newHistory = get().remoteHistory;
       let newIndex = get().remoteHistoryIndex;
@@ -190,12 +224,30 @@ export const useFileStore = create<FileState>((set, get) => ({
         newIndex = newHistory.length - 1;
       }
 
+      const updatedPane: ServerPaneState = {
+        remotePath: cleanPath,
+        remoteFiles: files,
+        remoteHistory: newHistory,
+        remoteHistoryIndex: newIndex,
+        remoteLoading: false,
+        remoteError: null,
+        remoteSelected: [],
+        remoteSearchQuery: get().remoteSearchQuery,
+      };
+
+      const updatedPanes = { ...get().serverPanes };
+      if (activeId) {
+        updatedPanes[activeId] = updatedPane;
+      }
+
       set({
         remotePath: cleanPath,
         remoteFiles: files,
         remoteHistory: newHistory,
         remoteHistoryIndex: newIndex,
         remoteLoading: false,
+        serverPanes: updatedPanes,
+        activeServerId: activeId || null,
       });
     } catch (e: any) {
       set({ remoteLoading: false, remoteError: e.toString(), remoteFiles: [] });
@@ -270,4 +322,62 @@ export const useFileStore = create<FileState>((set, get) => ({
   },
 
   setRemoteSearchQuery: (query) => set({ remoteSearchQuery: query }),
+
+  switchRemoteServer: async (profileId: string, initialPath?: string) => {
+    const currentActiveId = get().activeServerId;
+    const panes = { ...get().serverPanes };
+
+    // Save current active server state if we had one
+    if (currentActiveId) {
+      panes[currentActiveId] = {
+        remotePath: get().remotePath,
+        remoteFiles: get().remoteFiles,
+        remoteHistory: get().remoteHistory,
+        remoteHistoryIndex: get().remoteHistoryIndex,
+        remoteLoading: get().remoteLoading,
+        remoteError: get().remoteError,
+        remoteSelected: get().remoteSelected,
+        remoteSearchQuery: get().remoteSearchQuery,
+      };
+    }
+
+    // Check if target server already has cached state in memory
+    const existingPane = panes[profileId];
+    if (existingPane && existingPane.remoteFiles.length > 0) {
+      set({
+        activeServerId: profileId,
+        serverPanes: panes,
+        remotePath: existingPane.remotePath,
+        remoteFiles: existingPane.remoteFiles,
+        remoteHistory: existingPane.remoteHistory,
+        remoteHistoryIndex: existingPane.remoteHistoryIndex,
+        remoteLoading: false,
+        remoteError: existingPane.remoteError,
+        remoteSelected: [],
+        remoteSearchQuery: "",
+      });
+    } else {
+      // Initialize target server pane and fetch its directory
+      const path = initialPath || ".";
+      set({
+        activeServerId: profileId,
+        serverPanes: panes,
+        remotePath: path,
+        remoteFiles: [],
+        remoteHistory: [path],
+        remoteHistoryIndex: 0,
+        remoteLoading: true,
+        remoteError: null,
+        remoteSelected: [],
+        remoteSearchQuery: "",
+      });
+      await get().loadRemoteDirectory(path, false, false, profileId);
+    }
+  },
+
+  closeRemoteServer: (profileId: string) => {
+    const panes = { ...get().serverPanes };
+    delete panes[profileId];
+    set({ serverPanes: panes });
+  },
 }));

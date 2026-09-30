@@ -60,7 +60,7 @@ pub fn run() {
                     tauri::async_runtime::spawn(async move {
                         let _ = tokio::time::timeout(std::time::Duration::from_millis(800), async {
                             state.transfers.shutdown().await;
-                            state.sftp.disconnect().await;
+                            state.sftp.disconnect(None).await;
                         })
                         .await;
 
@@ -83,6 +83,8 @@ pub fn run() {
             commands::test_sftp_connection,
             commands::connect_sftp,
             commands::disconnect_sftp,
+            commands::switch_sftp_session,
+            commands::get_active_sessions,
             commands::exit_app,
             commands::get_connection_status,
             commands::get_connection_logs,
