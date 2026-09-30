@@ -306,8 +306,8 @@ impl TransferEngine {
         let transferred_atomic = Arc::new(std::sync::atomic::AtomicU64::new(transferred));
         let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        // 32 in-flight pipelined writes of 32 KB each
-        let in_flight_concurrency = 32;
+        // 128 in-flight pipelined writes of 32 KB each (4 MB sliding window)
+        let in_flight_concurrency = 128;
         let semaphore = Arc::new(tokio::sync::Semaphore::new(in_flight_concurrency));
         let mut write_tasks = tokio::task::JoinSet::new();
 
@@ -415,6 +415,23 @@ impl TransferEngine {
                 Ok::<(), String>(())
             });
 
+            // Drain completed write tasks without blocking
+            while let Some(res) = write_tasks.try_join_next() {
+                match res {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        upload_error = Some(e);
+                        break;
+                    }
+                    Err(je) => {
+                        cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        upload_error = Some(je.to_string());
+                        break;
+                    }
+                }
+            }
+
             // Drain completed write tasks
             while write_tasks.len() >= in_flight_concurrency * 2 {
                 if let Some(res) = write_tasks.join_next().await {
@@ -516,7 +533,7 @@ impl TransferEngine {
         }
 
         // Dedicated disk writer task on blocking thread pool
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<(u64, Vec<u8>)>(128);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(u64, Vec<u8>)>(512);
         let writer_dest = dest_path.clone();
 
         let writer_handle = tokio::task::spawn_blocking(move || -> Result<(), String> {
@@ -540,9 +557,9 @@ impl TransferEngine {
             Ok(())
         });
 
-        // 64 in-flight pipelined requests of 32 KB each (2 MB sliding window across the wire)
+        // 256 in-flight pipelined requests of 32 KB each (8 MB sliding window matching SSH flow control)
         let chunk_size: u64 = 32 * 1024;
-        let in_flight_concurrency = 64;
+        let in_flight_concurrency = 256;
         let semaphore = Arc::new(tokio::sync::Semaphore::new(in_flight_concurrency));
 
         let transferred_atomic = Arc::new(std::sync::atomic::AtomicU64::new(item.transferred_bytes));
@@ -596,6 +613,7 @@ impl TransferEngine {
         let mut current_offset = item.transferred_bytes;
         let mut tasks = tokio::task::JoinSet::new();
         let mut download_error: Option<String> = None;
+        let mut loop_count: usize = 0;
 
         // Loop to dispatch pipelined read packets
         while current_offset < total_size || (total_size == 0 && !eof_reached.load(std::sync::atomic::Ordering::Relaxed)) {
@@ -606,8 +624,9 @@ impl TransferEngine {
                 break;
             }
 
-            // Check pause or cancel
-            {
+            loop_count += 1;
+            // Check pause or cancel periodically (every 64 chunks ~ 2 MB) to avoid lock contention
+            if loop_count % 64 == 0 {
                 let flags = self.paused_or_cancelled.read().await;
                 if let Some(status) = flags.get(&item.id) {
                     match status {
@@ -681,6 +700,23 @@ impl TransferEngine {
                 }
                 Ok(())
             });
+
+            // Drain completed tasks without blocking
+            while let Some(join_res) = tasks.try_join_next() {
+                match join_res {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        download_error = Some(e);
+                        break;
+                    }
+                    Err(join_err) => {
+                        cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                        download_error = Some(join_err.to_string());
+                        break;
+                    }
+                }
+            }
 
             // Drain finished tasks periodically to check for errors and free memory
             while tasks.len() >= in_flight_concurrency * 2 {
