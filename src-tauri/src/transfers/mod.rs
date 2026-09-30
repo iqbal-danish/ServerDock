@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -9,8 +9,6 @@ use uuid::Uuid;
 use crate::database::Database;
 use crate::sftp::SftpManager;
 use crate::types::{TransferDirection, TransferItem, TransferStatus};
-
-const CHUNK_SIZE: usize = 256 * 1024; // 256 KB chunks for high-speed streaming
 
 #[derive(Clone)]
 pub struct TransferEngine {
@@ -274,13 +272,11 @@ impl TransferEngine {
     }
 
     async fn execute_upload(&self, item: &TransferItem) -> Result<(), String> {
-        use tokio::io::AsyncWriteExt;
         let sftp_client = self.sftp_manager.get_sftp_client().await?;
 
         let mut local_file = File::open(&item.source_path)
             .map_err(|e| format!("Failed to open local file: {e}"))?;
 
-        // Determine total size if 0
         let total_size = if item.total_bytes > 0 {
             item.total_bytes
         } else {
@@ -288,265 +284,33 @@ impl TransferEngine {
         };
 
         let clean_dest = item.dest_path.replace('\\', "/");
-        let mut remote_file = sftp_client
-            .create(&clean_dest)
+        let handle_pkt = sftp_client
+            .open(
+                &clean_dest,
+                russh_sftp::protocol::OpenFlags::CREATE | russh_sftp::protocol::OpenFlags::TRUNCATE | russh_sftp::protocol::OpenFlags::WRITE,
+                russh_sftp::protocol::FileAttributes::empty(),
+            )
             .await
             .map_err(|e| format!("Failed to create remote file {clean_dest}: {e}"))?;
+        let handle = Arc::new(handle_pkt.handle);
 
-        let mut buffer = vec![0u8; CHUNK_SIZE];
-        let mut transferred = item.transferred_bytes;
+        let transferred = item.transferred_bytes;
         if transferred > 0 {
             local_file
                 .seek(SeekFrom::Start(transferred))
                 .map_err(|e| format!("Failed to seek local file: {e}"))?;
         }
 
-        let mut buffered_local = std::io::BufReader::with_capacity(CHUNK_SIZE, local_file);
+        let mut buffered_local = std::io::BufReader::with_capacity(256 * 1024, local_file);
 
-        let mut last_sample_time = Instant::now();
-        let mut bytes_since_sample = 0u64;
-
-        loop {
-            // Check pause or cancel
-            {
-                let flags = self.paused_or_cancelled.read().await;
-                if let Some(status) = flags.get(&item.id) {
-                    match status {
-                        TransferStatus::Paused => return Err("Transfer paused".to_string()),
-                        TransferStatus::Cancelled => return Err("Transfer cancelled".to_string()),
-                        _ => {}
-                    }
-                }
-            }
-
-            let bytes_read = buffered_local
-                .read(&mut buffer)
-                .map_err(|e| format!("Error reading local file: {e}"))?;
-
-            if bytes_read == 0 {
-                break; // EOF
-            }
-
-            remote_file
-                .write_all(&buffer[..bytes_read])
-                .await
-                .map_err(|e| format!("Error writing to remote file: {e}"))?;
-
-            transferred += bytes_read as u64;
-            bytes_since_sample += bytes_read as u64;
-
-            let elapsed = last_sample_time.elapsed();
-            if elapsed >= Duration::from_millis(400) {
-                let speed = ((bytes_since_sample as f64) / elapsed.as_secs_f64()) as u64;
-                let remaining_bytes = total_size.saturating_sub(transferred);
-                let eta = if speed > 0 {
-                    Some(remaining_bytes / speed)
-                } else {
-                    None
-                };
-
-                {
-                    let mut map = self.transfers.write().await;
-                    if let Some(t) = map.get_mut(&item.id) {
-                        t.transferred_bytes = transferred;
-                        t.total_bytes = total_size;
-                        t.speed_bytes_per_sec = speed;
-                        t.eta_seconds = eta;
-                        let clone = t.clone();
-                        drop(map);
-                        self.emit_update(&clone).await;
-                    }
-                }
-
-                last_sample_time = Instant::now();
-                bytes_since_sample = 0;
-            }
-        }
-
-        remote_file
-            .flush()
-            .await
-            .map_err(|e| format!("Failed to flush remote file: {e}"))?;
-
-        self.sftp_manager.clear_dir_cache().await;
-
-        Ok(())
-    }
-
-    async fn execute_download(&self, item: &TransferItem) -> Result<(), String> {
-        // Ensure parent directory exists locally
-        if let Some(parent) = std::path::Path::new(&item.dest_path).parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-
-        let sftp_client = self.sftp_manager.get_sftp_client().await?;
-
-        // Determine total size
-        let total_size = if item.total_bytes > 0 {
-            item.total_bytes
-        } else {
-            match sftp_client.metadata(&item.source_path).await {
-                Ok(meta) => meta.size.unwrap_or(0),
-                Err(_) => 0,
-            }
-        };
-
-        // If file >= 2 MB and starting fresh, use parallel multi-stream segmented download for 5x-10x speedup
-        if total_size >= 2 * 1024 * 1024 && item.transferred_bytes == 0 {
-            match self.execute_multi_stream_download(item, total_size).await {
-                Ok(()) => return Ok(()),
-                Err(e) => {
-                    // Check if cancelled or paused
-                    let flags = self.paused_or_cancelled.read().await;
-                    if let Some(status) = flags.get(&item.id) {
-                        if *status == TransferStatus::Paused || *status == TransferStatus::Cancelled {
-                            return Err(e);
-                        }
-                    }
-                    // Server may restrict multiple handles; log and fall back to single stream
-                    self.sftp_manager
-                        .log("WARN", "TRANSFER", &format!("Multi-stream download note: {e}. Falling back to single-stream pipeline..."))
-                        .await;
-                }
-            }
-        }
-
-        self.execute_single_stream_download(item, total_size).await
-    }
-
-    async fn execute_multi_stream_download(
-        &self,
-        item: &TransferItem,
-        total_size: u64,
-    ) -> Result<(), String> {
-        use tokio::fs::OpenOptions;
-        use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-
-        let sftp_client = self.sftp_manager.get_sftp_client().await?;
-
-        // Preallocate destination file locally to prevent disk fragmentation
-        {
-            let std_file = std::fs::OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&item.dest_path)
-                .map_err(|e| format!("Failed to create local destination file: {e}"))?;
-            let _ = std_file.set_len(total_size);
-        }
-
-        // 4 concurrent segments
-        let num_workers: u64 = 4;
-        let segment_size = (total_size + num_workers - 1) / num_workers;
-
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<(u64, Vec<u8>)>(64);
-        let dest_path = item.dest_path.clone();
-
-        // Dedicated disk writer task
-        let writer_handle = tokio::spawn(async move {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .open(&dest_path)
-                .await
-                .map_err(|e| format!("Failed to open local destination for writing: {e}"))?;
-
-            while let Some((offset, chunk)) = rx.recv().await {
-                file.seek(SeekFrom::Start(offset))
-                    .await
-                    .map_err(|e| format!("Failed to seek local file: {e}"))?;
-                file.write_all(&chunk)
-                    .await
-                    .map_err(|e| format!("Failed to write to local file: {e}"))?;
-            }
-            file.flush().await.map_err(|e| format!("Failed to flush local file: {e}"))?;
-            Ok::<(), String>(())
-        });
-
-        let transferred_atomic = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let transferred_atomic = Arc::new(std::sync::atomic::AtomicU64::new(transferred));
         let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        let mut worker_tasks = Vec::new();
+        // 16 in-flight pipelined writes
+        let in_flight_concurrency = 16;
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(in_flight_concurrency));
+        let mut write_tasks = tokio::task::JoinSet::new();
 
-        for worker_id in 0..num_workers {
-            let start_offset = worker_id * segment_size;
-            let end_offset = (start_offset + segment_size).min(total_size);
-            if start_offset >= end_offset {
-                continue;
-            }
-
-            let client = sftp_client.clone();
-            let source_path = item.source_path.clone();
-            let item_id = item.id.clone();
-            let paused_flags = self.paused_or_cancelled.clone();
-            let worker_tx = tx.clone();
-            let transferred = transferred_atomic.clone();
-            let cancel = cancel_flag.clone();
-
-            worker_tasks.push(tokio::spawn(async move {
-                let mut remote_file = client
-                    .open(&source_path)
-                    .await
-                    .map_err(|e| format!("Worker {worker_id} failed to open file: {e}"))?;
-
-                remote_file
-                    .seek(SeekFrom::Start(start_offset))
-                    .await
-                    .map_err(|e| format!("Worker {worker_id} seek failed: {e}"))?;
-
-                let mut current_offset = start_offset;
-                let mut buffer = vec![0u8; CHUNK_SIZE];
-
-                while current_offset < end_offset {
-                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                        return Err("Cancelled".to_string());
-                    }
-
-                    {
-                        let flags = paused_flags.read().await;
-                        if let Some(status) = flags.get(&item_id) {
-                            match status {
-                                TransferStatus::Paused => {
-                                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                                    return Err("Transfer paused".to_string());
-                                }
-                                TransferStatus::Cancelled => {
-                                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                                    return Err("Transfer cancelled".to_string());
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-
-                    let remaining = (end_offset - current_offset) as usize;
-                    let to_read = remaining.min(buffer.len());
-
-                    let bytes_read = remote_file
-                        .read(&mut buffer[..to_read])
-                        .await
-                        .map_err(|e| format!("Worker {worker_id} read error: {e}"))?;
-
-                    if bytes_read == 0 {
-                        break; // EOF
-                    }
-
-                    let chunk = buffer[..bytes_read].to_vec();
-                    if worker_tx.send((current_offset, chunk)).await.is_err() {
-                        return Err("Writer channel closed".to_string());
-                    }
-
-                    current_offset += bytes_read as u64;
-                    transferred.fetch_add(bytes_read as u64, std::sync::atomic::Ordering::Relaxed);
-                }
-
-                Ok::<(), String>(())
-            }));
-        }
-
-        // Drop initial tx sender so receiver terminates when all workers finish
-        drop(tx);
-
-        // Progress monitor loop
         let monitor_handle = {
             let item_id = item.id.clone();
             let transfers = self.transfers.clone();
@@ -556,7 +320,7 @@ impl TransferEngine {
 
             tokio::spawn(async move {
                 let mut last_sample_time = Instant::now();
-                let mut last_bytes = 0u64;
+                let mut last_bytes = transferred.load(std::sync::atomic::Ordering::Relaxed);
 
                 while !cancel.load(std::sync::atomic::Ordering::Relaxed) {
                     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -584,84 +348,16 @@ impl TransferEngine {
                         last_sample_time = Instant::now();
                         last_bytes = current;
                     }
-                    if current >= total_size {
+                    if current >= total_size && total_size > 0 {
                         break;
                     }
                 }
             })
         };
 
-        // Wait for workers
-        let mut first_err = None;
-        for task in worker_tasks {
-            match task.await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => {
-                    cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                    if first_err.is_none() {
-                        first_err = Some(e);
-                    }
-                }
-                Err(join_err) => {
-                    cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                    if first_err.is_none() {
-                        first_err = Some(join_err.to_string());
-                    }
-                }
-            }
-        }
-
-        cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-        let _ = monitor_handle.await;
-
-        let writer_res = writer_handle
-            .await
-            .map_err(|e| format!("Writer task join error: {e}"))??;
-
-        if let Some(e) = first_err {
-            return Err(e);
-        }
-
-        Ok(writer_res)
-    }
-
-    async fn execute_single_stream_download(
-        &self,
-        item: &TransferItem,
-        total_size: u64,
-    ) -> Result<(), String> {
-        use tokio::io::{AsyncReadExt, AsyncSeekExt};
-        let sftp_client = self.sftp_manager.get_sftp_client().await?;
-
-        let mut remote_file = sftp_client
-            .open(&item.source_path)
-            .await
-            .map_err(|e| format!("Failed to open remote file: {e}"))?;
-
-        let local_file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(item.transferred_bytes == 0)
-            .open(&item.dest_path)
-            .map_err(|e| format!("Failed to open local destination file: {e}"))?;
-
-        let mut buffered_local = std::io::BufWriter::with_capacity(CHUNK_SIZE, local_file);
-
-        let mut transferred = item.transferred_bytes;
-        if transferred > 0 {
-            buffered_local
-                .seek(SeekFrom::Start(transferred))
-                .map_err(|e| format!("Failed to seek local file: {e}"))?;
-
-            remote_file
-                .seek(SeekFrom::Start(transferred))
-                .await
-                .map_err(|e| format!("Failed to seek remote file: {e}"))?;
-        }
-
-        let mut buffer = vec![0u8; CHUNK_SIZE];
-        let mut last_sample_time = Instant::now();
-        let mut bytes_since_sample = 0u64;
+        let mut current_offset = transferred;
+        let mut buffer = vec![0u8; 64 * 1024];
+        let mut upload_error: Option<String> = None;
 
         loop {
             // Check pause or cancel
@@ -669,58 +365,390 @@ impl TransferEngine {
                 let flags = self.paused_or_cancelled.read().await;
                 if let Some(status) = flags.get(&item.id) {
                     match status {
-                        TransferStatus::Paused => return Err("Transfer paused".to_string()),
-                        TransferStatus::Cancelled => return Err("Transfer cancelled".to_string()),
+                        TransferStatus::Paused => {
+                            cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            upload_error = Some("Transfer paused".to_string());
+                            break;
+                        }
+                        TransferStatus::Cancelled => {
+                            cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            upload_error = Some("Transfer cancelled".to_string());
+                            break;
+                        }
                         _ => {}
                     }
                 }
             }
 
-            let bytes_read = remote_file
-                .read(&mut buffer)
-                .await
-                .map_err(|e| format!("Error reading remote file: {e}"))?;
+            let bytes_read = match buffered_local.read(&mut buffer) {
+                Ok(n) => n,
+                Err(e) => {
+                    cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                    upload_error = Some(format!("Error reading local file: {e}"));
+                    break;
+                }
+            };
 
             if bytes_read == 0 {
                 break; // EOF
             }
 
-            buffered_local
-                .write_all(&buffer[..bytes_read])
-                .map_err(|e| format!("Error writing local file: {e}"))?;
+            let permit = match semaphore.clone().acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => break,
+            };
 
-            transferred += bytes_read as u64;
-            bytes_since_sample += bytes_read as u64;
+            let chunk = buffer[..bytes_read].to_vec();
+            let chunk_len = bytes_read as u64;
+            let offset = current_offset;
+            current_offset += chunk_len;
 
-            let elapsed = last_sample_time.elapsed();
-            if elapsed >= Duration::from_millis(300) {
-                let speed = ((bytes_since_sample as f64) / elapsed.as_secs_f64()) as u64;
-                let remaining_bytes = total_size.saturating_sub(transferred);
-                let eta = if speed > 0 {
-                    Some(remaining_bytes / speed)
-                } else {
-                    None
-                };
+            let client = sftp_client.clone();
+            let file_handle = handle.clone();
+            let transferred = transferred_atomic.clone();
 
-                {
-                    let mut map = self.transfers.write().await;
-                    if let Some(t) = map.get_mut(&item.id) {
-                        t.transferred_bytes = transferred;
-                        t.total_bytes = total_size;
-                        t.speed_bytes_per_sec = speed;
-                        t.eta_seconds = eta;
-                        let clone = t.clone();
-                        drop(map);
-                        self.emit_update(&clone).await;
+            write_tasks.spawn(async move {
+                let _permit = permit;
+                client.write(file_handle.as_str(), offset, chunk).await
+                    .map_err(|e| format!("Remote write error at offset {offset}: {e}"))?;
+                transferred.fetch_add(chunk_len, std::sync::atomic::Ordering::Relaxed);
+                Ok::<(), String>(())
+            });
+
+            // Drain completed write tasks
+            while write_tasks.len() >= in_flight_concurrency * 2 {
+                if let Some(res) = write_tasks.join_next().await {
+                    match res {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            upload_error = Some(e);
+                            break;
+                        }
+                        Err(je) => {
+                            cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            upload_error = Some(je.to_string());
+                            break;
+                        }
                     }
                 }
+            }
 
-                last_sample_time = Instant::now();
-                bytes_since_sample = 0;
+            if upload_error.is_some() {
+                break;
             }
         }
 
-        buffered_local.flush().map_err(|e| format!("Failed to flush local file: {e}"))?;
+        // Wait for all remaining write tasks to complete
+        while let Some(res) = write_tasks.join_next().await {
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    if upload_error.is_none() {
+                        upload_error = Some(e);
+                    }
+                }
+                Err(je) => {
+                    if upload_error.is_none() {
+                        upload_error = Some(je.to_string());
+                    }
+                }
+            }
+        }
+
+        // Stop monitor
+        cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = monitor_handle.await;
+
+        // Close remote handle
+        let _ = sftp_client.close(handle.as_str()).await;
+        self.sftp_manager.clear_dir_cache().await;
+
+        if let Some(e) = upload_error {
+            return Err(e);
+        }
+
+        Ok(())
+    }
+
+    async fn execute_download(&self, item: &TransferItem) -> Result<(), String> {
+        // Ensure parent directory exists locally
+        if let Some(parent) = std::path::Path::new(&item.dest_path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        let sftp_client = self.sftp_manager.get_sftp_client().await?;
+        let clean_source = item.source_path.replace('\\', "/");
+
+        // Determine total size
+        let total_size = if item.total_bytes > 0 {
+            item.total_bytes
+        } else {
+            match sftp_client.stat(&clean_source).await {
+                Ok(attrs) => attrs.attrs.size.unwrap_or(0),
+                Err(_) => 0,
+            }
+        };
+
+        // Open remote file handle
+        let handle_pkt = sftp_client
+            .open(
+                &clean_source,
+                russh_sftp::protocol::OpenFlags::READ,
+                russh_sftp::protocol::FileAttributes::empty(),
+            )
+            .await
+            .map_err(|e| format!("Failed to open remote file {clean_source}: {e}"))?;
+        let handle = Arc::new(handle_pkt.handle);
+
+        // Preallocate or prepare local file
+        let dest_path = item.dest_path.clone();
+        {
+            let local_file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(item.transferred_bytes == 0)
+                .open(&dest_path)
+                .map_err(|e| format!("Failed to open local destination file: {e}"))?;
+            if total_size > 0 {
+                let _ = local_file.set_len(total_size);
+            }
+        }
+
+        // Dedicated disk writer task on blocking thread pool
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(u64, Vec<u8>)>(64);
+        let writer_dest = dest_path.clone();
+
+        let writer_handle = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            use std::fs::OpenOptions;
+            use std::io::{Seek, SeekFrom, Write};
+
+            let mut file = OpenOptions::new()
+                .write(true)
+                .open(&writer_dest)
+                .map_err(|e| format!("Failed to open local destination for writing: {e}"))?;
+
+            while let Some((offset, chunk)) = rx.blocking_recv() {
+                file.seek(SeekFrom::Start(offset))
+                    .map_err(|e| format!("Failed to seek local file: {e}"))?;
+                file.write_all(&chunk)
+                    .map_err(|e| format!("Failed to write to local file: {e}"))?;
+            }
+
+            file.flush()
+                .map_err(|e| format!("Failed to flush local file: {e}"))?;
+            Ok(())
+        });
+
+        // 32 in-flight pipelined requests of 64 KB each (2 MB sliding window across the wire)
+        let chunk_size: u64 = 64 * 1024;
+        let in_flight_concurrency = 32;
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(in_flight_concurrency));
+
+        let transferred_atomic = Arc::new(std::sync::atomic::AtomicU64::new(item.transferred_bytes));
+        let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let eof_reached = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let monitor_handle = {
+            let item_id = item.id.clone();
+            let transfers = self.transfers.clone();
+            let transferred = transferred_atomic.clone();
+            let app_handle = self.app_handle.clone();
+            let cancel = cancel_flag.clone();
+
+            tokio::spawn(async move {
+                let mut last_sample_time = Instant::now();
+                let mut last_bytes = transferred.load(std::sync::atomic::Ordering::Relaxed);
+
+                while !cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    let current = transferred.load(std::sync::atomic::Ordering::Relaxed);
+                    let elapsed = last_sample_time.elapsed();
+                    if elapsed >= Duration::from_millis(300) {
+                        let delta = current.saturating_sub(last_bytes);
+                        let speed = ((delta as f64) / elapsed.as_secs_f64()) as u64;
+                        let rem = total_size.saturating_sub(current);
+                        let eta = if speed > 0 { Some(rem / speed) } else { None };
+
+                        {
+                            let mut map = transfers.write().await;
+                            if let Some(t) = map.get_mut(&item_id) {
+                                t.transferred_bytes = current;
+                                t.total_bytes = total_size;
+                                t.speed_bytes_per_sec = speed;
+                                t.eta_seconds = eta;
+                                let clone = t.clone();
+                                drop(map);
+                                let _ = app_handle.emit("transfer-update", &clone);
+                            }
+                        }
+
+                        last_sample_time = Instant::now();
+                        last_bytes = current;
+                    }
+                    if current >= total_size && total_size > 0 {
+                        break;
+                    }
+                }
+            })
+        };
+
+        let mut current_offset = item.transferred_bytes;
+        let mut tasks = tokio::task::JoinSet::new();
+        let mut download_error: Option<String> = None;
+
+        // Loop to dispatch pipelined read packets
+        while current_offset < total_size || (total_size == 0 && current_offset == 0) {
+            if cancel_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+            if eof_reached.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+
+            // Check pause or cancel
+            {
+                let flags = self.paused_or_cancelled.read().await;
+                if let Some(status) = flags.get(&item.id) {
+                    match status {
+                        TransferStatus::Paused => {
+                            cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            download_error = Some("Transfer paused".to_string());
+                            break;
+                        }
+                        TransferStatus::Cancelled => {
+                            cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            download_error = Some("Transfer cancelled".to_string());
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            let permit = match semaphore.clone().acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => break,
+            };
+
+            let read_len = if total_size > 0 {
+                ((total_size - current_offset) as usize).min(chunk_size as usize)
+            } else {
+                chunk_size as usize
+            };
+
+            let offset = current_offset;
+            current_offset += read_len as u64;
+
+            let client = sftp_client.clone();
+            let file_handle = handle.clone();
+            let tx_clone = tx.clone();
+            let transferred = transferred_atomic.clone();
+            let eof = eof_reached.clone();
+            let cancel = cancel_flag.clone();
+
+            tasks.spawn(async move {
+                let _permit = permit;
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Ok::<(), String>(());
+                }
+
+                let res = client.read(file_handle.as_str(), offset, read_len as u32).await;
+                match res {
+                    Ok(data) => {
+                        if data.data.is_empty() {
+                            eof.store(true, std::sync::atomic::Ordering::Relaxed);
+                            return Ok(());
+                        }
+                        let len = data.data.len();
+                        if tx_clone.send((offset, data.data.to_vec())).await.is_err() {
+                            return Err("Disk writer channel closed".to_string());
+                        }
+                        transferred.fetch_add(len as u64, std::sync::atomic::Ordering::Relaxed);
+                        if len < read_len {
+                            eof.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        Ok(())
+                    }
+                    Err(russh_sftp::client::error::Error::Status(status))
+                        if status.status_code == russh_sftp::protocol::StatusCode::Eof => {
+                            eof.store(true, std::sync::atomic::Ordering::Relaxed);
+                            Ok(())
+                        }
+                    Err(e) => Err(format!("SFTP read error at offset {offset}: {e}")),
+                }
+            });
+
+            // Drain finished tasks periodically to check for errors and free memory
+            while tasks.len() >= in_flight_concurrency * 2 {
+                if let Some(join_res) = tasks.join_next().await {
+                    match join_res {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            download_error = Some(e);
+                            break;
+                        }
+                        Err(join_err) => {
+                            cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            download_error = Some(join_err.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if download_error.is_some() {
+                break;
+            }
+        }
+
+        // Wait for all remaining in-flight tasks to complete
+        while let Some(join_res) = tasks.join_next().await {
+            match join_res {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    if download_error.is_none() {
+                        download_error = Some(e);
+                    }
+                }
+                Err(join_err) => {
+                    if download_error.is_none() {
+                        download_error = Some(join_err.to_string());
+                    }
+                }
+            }
+        }
+
+        // Stop monitor
+        cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = monitor_handle.await;
+
+        // Close remote handle
+        let _ = sftp_client.close(handle.as_str()).await;
+
+        // Close disk writer channel and wait for disk writes to finish
+        drop(tx);
+        let writer_res = writer_handle
+            .await
+            .map_err(|e| format!("Disk writer task join error: {e}"))?;
+
+        if let Err(e) = writer_res {
+            return Err(e);
+        }
+
+        if let Some(e) = download_error {
+            return Err(e);
+        }
+
+        // Ensure final file size matches actual transferred bytes if EOF happened early
+        let final_bytes = transferred_atomic.load(std::sync::atomic::Ordering::Relaxed);
+        if total_size > 0 && final_bytes < total_size {
+            if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&dest_path) {
+                let _ = file.set_len(final_bytes);
+            }
+        }
+
         Ok(())
     }
 }

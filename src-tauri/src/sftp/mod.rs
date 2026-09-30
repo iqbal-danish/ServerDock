@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use russh::client::{self, Handler};
 use russh_keys::key::PrivateKeyWithHashAlg;
 use russh_keys::PublicKey;
-use russh_sftp::client::SftpSession;
+use russh_sftp::client::RawSftpSession;
 use tokio::sync::Mutex;
 use crate::types::{ConnectionTestResult, FileItem, TestStep};
 
@@ -25,7 +25,7 @@ impl Handler for ClientHandler {
 }
 
 pub struct ActiveSftpConnection {
-    pub client: Arc<SftpSession>,
+    pub client: Arc<RawSftpSession>,
     pub remote_path: String,
     pub profile_id: String,
     pub host: String,
@@ -147,7 +147,7 @@ impl SftpManager {
         }
     }
 
-    pub async fn get_client_and_key(&self, profile_id: Option<&str>) -> Result<(Arc<SftpSession>, String), String> {
+    pub async fn get_client_and_key(&self, profile_id: Option<&str>) -> Result<(Arc<RawSftpSession>, String), String> {
         let sessions = self.sessions.lock().await;
         let active = self.active_profile_id.lock().await;
 
@@ -328,8 +328,10 @@ impl SftpManager {
             };
         }
 
-        match SftpSession::new(channel.into_stream()).await {
+        let raw_sftp = RawSftpSession::new(channel.into_stream());
+        match raw_sftp.init().await {
             Ok(_) => {
+                let _ = raw_sftp.close_session();
                 steps[2].status = "success".to_string();
                 steps[2].message = Some("SFTP session established successfully".to_string());
                 self.log("SUCCESS", "SFTP", "SFTP subsystem initialized successfully.").await;
@@ -462,9 +464,10 @@ impl SftpManager {
 
         let mut sftp_config = russh_sftp::client::Config::default();
         sftp_config.max_packet_len = 256 * 1024;
-        sftp_config.max_concurrent_writes = 16;
-        let sftp = match SftpSession::new_with_config(channel.into_stream(), sftp_config).await {
-            Ok(s) => s,
+        sftp_config.max_concurrent_writes = 32;
+        let raw_sftp = RawSftpSession::new_with_config(channel.into_stream(), sftp_config);
+        let _version = match raw_sftp.init().await {
+            Ok(v) => v,
             Err(e) => {
                 let msg = format!("Failed to initialize SFTP client: {e}");
                 self.log("ERROR", "SFTP", &msg).await;
@@ -480,7 +483,7 @@ impl SftpManager {
             sessions.insert(
                 session_key.clone(),
                 ActiveSftpConnection {
-                    client: Arc::new(sftp),
+                    client: Arc::new(raw_sftp),
                     remote_path: default_dir.clone(),
                     profile_id: session_key.clone(),
                     host: host.to_string(),
@@ -521,14 +524,33 @@ impl SftpManager {
         }
 
         let target_dir = if norm_path == "." { "." } else { norm_path };
-        let read_dir = client
-            .read_dir(target_dir)
+        let open_res = client
+            .opendir(target_dir)
             .await
             .map_err(|e| format!("Failed to list remote directory {norm_path}: {e}"))?;
+        let handle = open_res.handle;
+
+        let mut raw_files = Vec::new();
+        loop {
+            match client.readdir(&handle).await {
+                Ok(name) => {
+                    raw_files.extend(name.files);
+                }
+                Err(russh_sftp::client::error::Error::Status(status))
+                    if status.status_code == russh_sftp::protocol::StatusCode::Eof => {
+                        break;
+                    }
+                Err(err) => {
+                    let _ = client.close(&handle).await;
+                    return Err(format!("Failed to readdir {norm_path}: {err}"));
+                }
+            }
+        }
+        let _ = client.close(&handle).await;
 
         let mut items = Vec::new();
-        for entry in read_dir {
-            let name = entry.file_name();
+        for entry in raw_files {
+            let name = entry.filename;
             // Ignore current and parent dir aliases if returned by some SFTP servers
             if name == "." || name == ".." {
                 continue;
@@ -543,7 +565,7 @@ impl SftpManager {
                 format!("{}/{}", norm_path, name)
             };
 
-            let attrs = entry.metadata();
+            let attrs = entry.attrs;
             let is_dir = attrs.is_dir();
             let is_symlink = attrs.is_symlink();
             let size = attrs.size.unwrap_or(0);
@@ -603,7 +625,7 @@ impl SftpManager {
         let clean = path.replace('\\', "/");
         let (client, session_key) = self.get_client_and_key(profile_id).await?;
         client
-            .create_dir(&clean)
+            .mkdir(&clean, russh_sftp::protocol::FileAttributes::empty())
             .await
             .map_err(|e| format!("Failed to create remote directory {clean}: {e}"))?;
         self.clear_dir_cache_for(Some(&session_key)).await;
@@ -615,17 +637,17 @@ impl SftpManager {
         let (client, session_key) = self.get_client_and_key(profile_id).await?;
         let res = if is_dir {
             client
-                .remove_dir(&clean)
+                .rmdir(&clean)
                 .await
                 .map_err(|e| format!("Failed to remove remote directory {clean}: {e}"))
         } else {
             client
-                .remove_file(&clean)
+                .remove(&clean)
                 .await
                 .map_err(|e| format!("Failed to remove remote file {clean}: {e}"))
         };
         self.clear_dir_cache_for(Some(&session_key)).await;
-        res
+        res.map(|_| ())
     }
 
     pub async fn rename(&self, old_path: &str, new_path: &str, profile_id: Option<&str>) -> Result<(), String> {
@@ -637,39 +659,32 @@ impl SftpManager {
             .await
             .map_err(|e| format!("Failed to rename remote file: {e}"));
         self.clear_dir_cache_for(Some(&session_key)).await;
-        res
+        res.map(|_| ())
     }
 
     pub async fn read_file_chunk(&self, path: &str, offset: u64, length: usize, profile_id: Option<&str>) -> Result<Vec<u8>, String> {
-        use tokio::io::AsyncReadExt;
-        use tokio::io::AsyncSeekExt;
         let clean = path.replace('\\', "/");
         let (client, _) = self.get_client_and_key(profile_id).await?;
 
-        let mut file = client
-            .open(&clean)
+        let handle_pkt = client
+            .open(&clean, russh_sftp::protocol::OpenFlags::READ, russh_sftp::protocol::FileAttributes::empty())
             .await
             .map_err(|e| format!("Failed to open remote file {clean}: {e}"))?;
 
-        file.seek(std::io::SeekFrom::Start(offset))
-            .await
-            .map_err(|e| format!("Failed to seek remote file: {e}"))?;
-
-        let mut buffer = vec![0u8; length];
-        let bytes_read = file
-            .read(&mut buffer)
+        let data_pkt = client
+            .read(&handle_pkt.handle, offset, length as u32)
             .await
             .map_err(|e| format!("Failed to read remote chunk: {e}"))?;
 
-        buffer.truncate(bytes_read);
-        Ok(buffer)
+        let _ = client.close(handle_pkt.handle).await;
+        Ok(data_pkt.data.to_vec())
     }
 
-    pub async fn get_sftp_client(&self) -> Result<Arc<SftpSession>, String> {
+    pub async fn get_sftp_client(&self) -> Result<Arc<RawSftpSession>, String> {
         self.get_sftp_client_for(None).await
     }
 
-    pub async fn get_sftp_client_for(&self, profile_id: Option<&str>) -> Result<Arc<SftpSession>, String> {
+    pub async fn get_sftp_client_for(&self, profile_id: Option<&str>) -> Result<Arc<RawSftpSession>, String> {
         let (client, _) = self.get_client_and_key(profile_id).await?;
         Ok(client)
     }
