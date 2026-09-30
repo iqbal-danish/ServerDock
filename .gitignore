@@ -8,6 +8,8 @@ dist/
 dist-ssr/
 build/
 out/
+*.exe
+*.msi
 
 # Rust / Cargo
 src-tauri/target/

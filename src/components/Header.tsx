@@ -40,9 +40,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Brand & Tabs */}
       <div className="flex items-center space-x-6">
         <div className="flex items-center space-x-2 font-semibold text-white tracking-wide">
-          <div className="w-7 h-7 rounded bg-blue-600 flex items-center justify-center text-white shadow-sm font-bold text-xs tracking-wider">
-            BF
-          </div>
+          <img src="/byteflow.png" alt="ByteFlow" className="w-6 h-6 object-contain rounded-sm" />
           <span className="text-sm">ByteFlow</span>
           <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-[#21262d] text-[#8b949e] border border-[#30363d]">
             v0.1

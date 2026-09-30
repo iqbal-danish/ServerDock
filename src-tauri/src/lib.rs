@@ -45,6 +45,9 @@ pub fn run() {
             app.manage(state);
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_theme(Some(tauri::Theme::Dark));
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = w.set_icon(icon.clone());
+                }
             }
             Ok(())
         })
