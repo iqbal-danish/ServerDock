@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-const SERVICE_NAME: &str = "byteflow-credentials";
+const SERVICE_NAME: &str = "serverdock-credentials";
+const LEGACY_SERVICE_NAME: &str = "byteflow-credentials";
 
 pub struct CredentialManager;
 
@@ -21,7 +22,16 @@ impl CredentialManager {
             .map_err(|e| format!("Failed to create keyring entry: {e}"))?;
         match entry.get_password() {
             Ok(pass) => Ok(Some(pass)),
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(keyring::Error::NoEntry) => {
+                // Try legacy credential store and migrate if found
+                if let Ok(legacy_entry) = keyring::Entry::new(LEGACY_SERVICE_NAME, profile_id) {
+                    if let Ok(pass) = legacy_entry.get_password() {
+                        let _ = entry.set_password(&pass);
+                        return Ok(Some(pass));
+                    }
+                }
+                Ok(None)
+            }
             Err(e) => Err(format!("Failed to retrieve secret from OS credential store: {e}")),
         }
     }

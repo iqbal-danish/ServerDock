@@ -1,13 +1,13 @@
 {
-  "feed": "ByteFlow Tech Jobs",
+  "feed": "ServerDock Tech Jobs",
   "version": "1.0",
   "generated_at": "2026-09-29T20:00:00Z",
   "jobs": [
     {
-      "id": "BF-001",
+      "id": "SD-001",
       "title": "Rust Core Systems Engineer",
       "department": "Infrastructure",
-      "company": "ByteFlow Systems",
+      "company": "ServerDock Systems",
       "location": {
         "city": "San Francisco",
         "country": "USA",
@@ -21,10 +21,10 @@
       "tags": ["rust", "systems", "tokio", "sftp"]
     },
     {
-      "id": "BF-002",
+      "id": "SD-002",
       "title": "Senior Desktop Engineer",
       "department": "Client Experience",
-      "company": "ByteFlow Systems",
+      "company": "ServerDock Systems",
       "location": {
         "city": "London",
         "country": "UK",

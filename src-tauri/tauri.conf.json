@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ByteFlow",
+  "productName": "ServerDock",
   "version": "0.1.0",
-  "identifier": "com.byteflow.app",
+  "identifier": "com.serverdock.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "ByteFlow — File Transfer & Large-File Workspace",
+        "title": "ServerDock — File Transfer & Large-File Workspace",
         "width": 1440,
         "height": 900,
         "minWidth": 1024,

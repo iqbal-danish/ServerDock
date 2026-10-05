@@ -1,12 +1,12 @@
 [package]
-name = "byteflow"
+name = "serverdock"
 version = "0.1.0"
-description = "ByteFlow - High-Performance File Transfer & Large-File Workspace"
+description = "ServerDock - High-Performance File Transfer & Large-File Workspace"
 authors = ["Danish Iqbal"]
 edition = "2021"
 
 [lib]
-name = "byteflow_lib"
+name = "serverdock_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

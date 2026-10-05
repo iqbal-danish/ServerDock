@@ -173,7 +173,7 @@ impl SftpManager {
         self.log("INFO", "SFTP", &format!("Testing connection to {host}:{port} as user '{username}'...")).await;
 
         if port == 21 || port == 20 {
-            self.log("WARN", "SFTP", "Port 21/20 detected: Standard unencrypted FTP runs on port 21. ByteFlow connects via SFTP (SSH subsystem, default port 22). If this is an FTP server, SFTP will fail.").await;
+            self.log("WARN", "SFTP", "Port 21/20 detected: Standard unencrypted FTP runs on port 21. ServerDock connects via SFTP (SSH subsystem, default port 22). If this is an FTP server, SFTP will fail.").await;
         }
 
         // Step 1: Reachability & Handshake
@@ -368,7 +368,7 @@ impl SftpManager {
         self.log("INFO", "SFTP", &format!("Connecting to {host}:{port} as user '{username}'...")).await;
 
         if port == 21 || port == 20 {
-            self.log("WARN", "SFTP", "Port 21 detected: Standard unencrypted FTP runs on port 21. ByteFlow connects via SFTP (SSH subsystem on port 22). If your server is FTP/FTPS, SFTP connection will fail.").await;
+            self.log("WARN", "SFTP", "Port 21 detected: Standard unencrypted FTP runs on port 21. ServerDock connects via SFTP (SSH subsystem on port 22). If your server is FTP/FTPS, SFTP connection will fail.").await;
         }
 
         let mut config = client::Config::default();

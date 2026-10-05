@@ -536,7 +536,7 @@ pub async fn run_performance_benchmark(path: Option<String>) -> Result<Vec<Bench
         // Benchmark 1: Memory Mapped Read Throughput
         let sample_data = vec![b'A'; 20 * 1024 * 1024]; // 20 MB buffer
         let temp_dir = std::env::temp_dir();
-        let test_file = temp_dir.join("byteflow_bench.tmp");
+        let test_file = temp_dir.join("serverdock_bench.tmp");
         let _ = std::fs::write(&test_file, &sample_data);
 
         let t0 = Instant::now();

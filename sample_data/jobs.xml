@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<source version="2.0" generator="ByteFlow Feed Engine">
-  <publisher>ByteFlow Feed System</publisher>
-  <publisherurl>https://byteflow.dev</publisherurl>
+<source version="2.0" generator="ServerDock Feed Engine">
+  <publisher>ServerDock Feed System</publisher>
+  <publisherurl>https://serverdock.dev</publisherurl>
   <lastBuildDate>Tue, 29 Sep 2026 20:00:00 GMT</lastBuildDate>
   <job id="BF-90210" status="active" type="full-time" remote="true">
     <title><![CDATA[Senior Rust Systems Engineer]]></title>
     <date><![CDATA[Tue, 29 Sep 2026 18:30:00 GMT]]></date>
     <referencenumber><![CDATA[BF-90210]]></referencenumber>
-    <url><![CDATA[https://byteflow.dev/jobs/90210]]></url>
-    <company><![CDATA[ByteFlow Labs]]></company>
+    <url><![CDATA[https://serverdock.dev/jobs/90210]]></url>
+    <company><![CDATA[ServerDock Labs]]></company>
     <category><![CDATA[Engineering]]></category>
     <city><![CDATA[San Francisco]]></city>
     <state><![CDATA[CA]]></state>
@@ -22,8 +22,8 @@
     <title><![CDATA[Staff Frontend Engineer - React & Desktop]]></title>
     <date><![CDATA[Tue, 29 Sep 2026 17:15:00 GMT]]></date>
     <referencenumber><![CDATA[BF-90211]]></referencenumber>
-    <url><![CDATA[https://byteflow.dev/jobs/90211]]></url>
-    <company><![CDATA[ByteFlow Labs]]></company>
+    <url><![CDATA[https://serverdock.dev/jobs/90211]]></url>
+    <company><![CDATA[ServerDock Labs]]></company>
     <city><![CDATA[New York]]></city>
     <state><![CDATA[NY]]></state>
     <country><![CDATA[US]]></country>
@@ -35,7 +35,7 @@
     <title><![CDATA[Cloud Infrastructure & Security Architect]]></title>
     <date><![CDATA[Mon, 28 Sep 2026 12:00:00 GMT]]></date>
     <referencenumber><![CDATA[BF-90212]]></referencenumber>
-    <url><![CDATA[https://byteflow.dev/jobs/90212]]></url>
+    <url><![CDATA[https://serverdock.dev/jobs/90212]]></url>
     <company><![CDATA[CyberScale Inc]]></company>
     <city><![CDATA[Seattle]]></city>
     <state><![CDATA[WA]]></state>
@@ -48,7 +48,7 @@
     <title><![CDATA[Data Feed Analyst]]></title>
     <date><![CDATA[Sun, 27 Sep 2026 10:00:00 GMT]]></date>
     <referencenumber><![CDATA[BF-90213]]></referencenumber>
-    <url><![CDATA[https://byteflow.dev/jobs/90213]]></url>
+    <url><![CDATA[https://serverdock.dev/jobs/90213]]></url>
     <company><![CDATA[CyberScale Inc]]></company>
     <city><![CDATA[Austin]]></city>
     <state><![CDATA[TX]]></state>
@@ -60,7 +60,7 @@
     <title><![CDATA[Senior Rust Systems Engineer]]></title>
     <date><![CDATA[Tue, 29 Sep 2026 19:00:00 GMT]]></date>
     <referencenumber><![CDATA[BF-90214]]></referencenumber>
-    <url><![CDATA[https://byteflow.dev/jobs/90214]]></url>
+    <url><![CDATA[https://serverdock.dev/jobs/90214]]></url>
     <company><![CDATA[StreamCore Tech]]></company>
     <city><![CDATA[Chicago]]></city>
     <state><![CDATA[IL]]></state>

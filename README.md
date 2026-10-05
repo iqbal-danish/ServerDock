@@ -1,16 +1,16 @@
-# ByteFlow — High-Performance File Transfer & Large-File Workspace
+# ServerDock — High-Performance File Transfer & Large-File Workspace
 
 > **Transfer. Inspect. Edit. Ship.**
 
-ByteFlow is a modern, high-performance developer desktop workspace that combines an ultra-fast pipelined SFTP client, multi-server session manager, dual-pane local/remote explorer, virtualized large-file streaming viewer/editor, XML/JSON validation tools, and side-by-side file diffing.
+ServerDock is a modern, high-performance developer desktop workspace that combines an ultra-fast pipelined SFTP client, multi-server session manager, dual-pane local/remote explorer, virtualized large-file streaming viewer/editor, XML/JSON validation tools, and side-by-side file diffing.
 
 ---
 
 ## Quick Start (How to Run)
 
 ### Option 1: Standalone Portable Binary (Windows)
-If you just want to run ByteFlow without setting up a developer environment:
-1. Double-click **`ByteFlow.exe`** in the root of the repository.
+If you just want to run ServerDock without setting up a developer environment:
+1. Double-click **`ServerDock.exe`** in the root of the repository.
 2. The application will launch immediately—no external dependencies or installations required.
 
 ---
@@ -71,8 +71,8 @@ npx tauri build --no-bundle
 
 The compiled executable will be generated at:
 ```text
-src-tauri/target/release/byteflow.exe    # Windows
-src-tauri/target/release/byteflow        # Linux / macOS
+src-tauri/target/release/serverdock.exe    # Windows
+src-tauri/target/release/serverdock        # Linux / macOS
 ```
 
 ---
@@ -97,7 +97,7 @@ src-tauri/target/release/byteflow        # Linux / macOS
   - Integrated line numbers with synchronized scrolling, regex/exact search, and jump-to-line navigation.
   - Syntax formatting and validation for XML & JSON.
 - **Embedded SQLite Persistence (`rusqlite`)**:
-  - Connection profiles, preferences, and transfer history saved locally.
+  - Connection profiles, preferences, and transfer history saved locally in `serverdock.db`.
 - **OS-Level Credential Protection (`keyring`)**:
   - Passwords and SSH private key passphrases are stored in the OS Credential Manager (Windows Credential Manager / macOS Keychain / Secret Service). No plaintext secrets.
 - **Native Windows Styling**:
@@ -122,8 +122,8 @@ src-tauri/target/release/byteflow        # Linux / macOS
 ## Project Structure
 
 ```text
-ByteFlow/
-├── ByteFlow.exe                    # Pre-compiled standalone portable Windows executable
+ServerDock/
+├── ServerDock.exe                  # Pre-compiled standalone portable Windows executable
 ├── sample_data/                    # Sample XML, JSON feeds and diff comparison files
 │   ├── jobs.xml
 │   ├── jobs-production.xml
@@ -174,6 +174,12 @@ All core engine tests pass:
 - `test_format_and_validate_json`
 - `test_compare_texts`
 - `test_mmap_read_lines`
+
+---
+
+## Repository
+
+- **GitHub:** [https://github.com/iqbal-danish/ServerDock](https://github.com/iqbal-danish/ServerDock)
 
 ---
 

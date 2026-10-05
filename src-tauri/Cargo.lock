@@ -418,37 +418,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
-name = "byteflow"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "dirs 6.0.0",
- "hex",
- "keyring",
- "memmap2",
- "quick-xml 0.37.5",
- "rayon",
- "regex",
- "rusqlite",
- "russh",
- "russh-keys",
- "russh-sftp",
- "serde",
- "serde_json",
- "sha2",
- "similar",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "thiserror 2.0.21",
- "tokio",
- "uuid",
- "walkdir",
-]
-
-[[package]]
 name = "bytemuck"
 version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4128,6 +4097,37 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "serverdock"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "dirs 6.0.0",
+ "hex",
+ "keyring",
+ "memmap2",
+ "quick-xml 0.37.5",
+ "rayon",
+ "regex",
+ "rusqlite",
+ "russh",
+ "russh-keys",
+ "russh-sftp",
+ "serde",
+ "serde_json",
+ "sha2",
+ "similar",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]

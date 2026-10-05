@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <source>
-  <publisher>ByteFlow Production Cluster</publisher>
-  <publisherurl>https://byteflow.dev/production</publisherurl>
+  <publisher>ServerDock Production Cluster</publisher>
+  <publisherurl>https://serverdock.dev/production</publisherurl>
   <lastBuildDate>Tue, 29 Sep 2026 21:00:00 GMT</lastBuildDate>
   <job>
     <title><![CDATA[Lead Rust Systems Architect]]></title>
     <date><![CDATA[Tue, 29 Sep 2026 18:30:00 GMT]]></date>
     <referencenumber><![CDATA[BF-90210]]></referencenumber>
-    <url><![CDATA[https://byteflow.dev/jobs/90210]]></url>
-    <company><![CDATA[ByteFlow Labs]]></company>
+    <url><![CDATA[https://serverdock.dev/jobs/90210]]></url>
+    <company><![CDATA[ServerDock Labs]]></company>
     <city><![CDATA[San Francisco]]></city>
     <state><![CDATA[CA]]></state>
     <country><![CDATA[US]]></country>
@@ -21,8 +21,8 @@
     <title><![CDATA[Staff Frontend Engineer - React & Desktop]]></title>
     <date><![CDATA[Tue, 29 Sep 2026 17:15:00 GMT]]></date>
     <referencenumber><![CDATA[BF-90211]]></referencenumber>
-    <url><![CDATA[https://byteflow.dev/jobs/90211]]></url>
-    <company><![CDATA[ByteFlow Labs]]></company>
+    <url><![CDATA[https://serverdock.dev/jobs/90211]]></url>
+    <company><![CDATA[ServerDock Labs]]></company>
     <city><![CDATA[New York]]></city>
     <state><![CDATA[NY]]></state>
     <country><![CDATA[US]]></country>
@@ -34,8 +34,8 @@
     <title><![CDATA[Principal Site Reliability Engineer]]></title>
     <date><![CDATA[Tue, 29 Sep 2026 20:30:00 GMT]]></date>
     <referencenumber><![CDATA[BF-90299]]></referencenumber>
-    <url><![CDATA[https://byteflow.dev/jobs/90299]]></url>
-    <company><![CDATA[ByteFlow Labs]]></company>
+    <url><![CDATA[https://serverdock.dev/jobs/90299]]></url>
+    <company><![CDATA[ServerDock Labs]]></company>
     <city><![CDATA[San Francisco]]></city>
     <state><![CDATA[CA]]></state>
     <country><![CDATA[US]]></country>

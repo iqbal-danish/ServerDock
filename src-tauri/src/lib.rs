@@ -27,7 +27,7 @@ pub fn run() {
             let app_data_dir = app
                 .path()
                 .app_data_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("byteflow_data"));
+                .unwrap_or_else(|_| std::path::PathBuf::from("serverdock_data"));
 
             let db = Database::new(app_data_dir).expect("Failed to initialize SQLite database");
             let logger = Logger::new(app_handle.clone());
@@ -132,5 +132,5 @@ pub fn run() {
             commands::run_performance_benchmark,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running ByteFlow application");
+        .expect("error while running ServerDock application");
 }

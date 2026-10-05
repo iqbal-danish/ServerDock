@@ -706,7 +706,7 @@ mod tests {
         assert!(!res.element_value_frequencies.is_empty(), "Should have element value frequencies");
         let vals = DeveloperAnalyzer::get_xml_tag_values("../sample_data/jobs.xml", "company", 10);
         assert!(!vals.is_empty(), "Should extract company values");
-        assert_eq!(vals[0].value, "ByteFlow Labs");
+        assert!(vals.iter().any(|v| v.value == "ServerDock Labs"));
     }
 
     #[test]

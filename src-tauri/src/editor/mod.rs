@@ -287,12 +287,12 @@ mod tests {
 
     #[test]
     fn test_format_and_validate_json() {
-        let valid = r#"{"name":"ByteFlow","version":1}"#;
+        let valid = r#"{"name":"ServerDock","version":1}"#;
         let (is_val, _) = LargeFileEngine::validate_json(valid);
         assert!(is_val);
 
         let formatted = LargeFileEngine::format_json(valid).unwrap();
-        assert!(formatted.contains("\n  \"name\": \"ByteFlow\""));
+        assert!(formatted.contains("\n  \"name\": \"ServerDock\""));
     }
 
     #[test]

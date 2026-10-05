@@ -11,7 +11,11 @@ pub struct Database {
 impl Database {
     pub fn new(app_data_dir: PathBuf) -> Result<Self, String> {
         std::fs::create_dir_all(&app_data_dir).map_err(|e| e.to_string())?;
-        let db_path = app_data_dir.join("byteflow.db");
+        let legacy_db = app_data_dir.join("byteflow.db");
+        let db_path = app_data_dir.join("serverdock.db");
+        if legacy_db.exists() && !db_path.exists() {
+            let _ = std::fs::rename(&legacy_db, &db_path);
+        }
         let conn = Connection::open(&db_path).map_err(|e| format!("Failed to open SQLite database: {e}"))?;
 
         // Initialize schema

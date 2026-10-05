@@ -27,7 +27,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* Header */}
         <div className="px-4 py-3 border-b border-[#30363d] flex items-center justify-between">
           <span className="font-semibold text-white text-sm">
-            ByteFlow Preferences & Diagnostics
+            ServerDock Preferences & Diagnostics
           </span>
           <button
             onClick={onClose}
@@ -118,7 +118,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     Windows Credential Manager Integration
                   </span>
                   <p className="text-[11px] text-[#8b949e] mt-0.5">
-                    ByteFlow stores passwords in the secure Windows Credential Manager (CredWrite API).
+                    ServerDock stores passwords in the secure Windows Credential Manager (CredWrite API).
                     Credentials are encrypted by Windows using your user account's master key and are never stored in plaintext SQLite.
                   </p>
                 </div>
@@ -301,14 +301,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="px-4 py-2.5 bg-[#0d1117] border-t border-[#30363d] flex items-center justify-between">
           <button
             onClick={() => {
-              if (confirm("Quit ByteFlow? All active connections, transfers, and open ports will be closed immediately.")) {
+              if (confirm("Quit ServerDock? All active connections, transfers, and open ports will be closed immediately.")) {
                 api.exitApp();
               }
             }}
             className="px-3 py-1.5 rounded bg-red-600/10 hover:bg-red-600/20 text-red-400 hover:text-red-300 font-medium border border-red-500/20 transition-colors flex items-center space-x-1.5"
           >
             <PowerOff className="w-3.5 h-3.5" />
-            <span>Quit ByteFlow</span>
+            <span>Quit ServerDock</span>
           </button>
 
           <button
