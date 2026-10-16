@@ -19,6 +19,7 @@ interface PaneHeaderProps {
   onForward: () => void;
   onUp: () => void;
   onRefresh: () => void;
+  loading?: boolean;
   onCreateFolder: (name: string) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
@@ -35,6 +36,7 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
   onForward,
   onUp,
   onRefresh,
+  loading = false,
   onCreateFolder,
   searchQuery,
   onSearchChange,
@@ -125,9 +127,10 @@ export const PaneHeader: React.FC<PaneHeaderProps> = ({
         <button
           onClick={onRefresh}
           title="Refresh (Ctrl+R)"
-          className="p-1 rounded text-[#8b949e] hover:text-white hover:bg-[#21262d] transition-colors"
+          disabled={loading}
+          className="p-1 rounded text-[#8b949e] hover:text-white hover:bg-[#21262d] transition-colors disabled:opacity-50"
         >
-          <RefreshCw className="w-3.5 h-3.5" />
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-blue-400' : ''}`} />
         </button>
         <button
           onClick={handleCreateFolder}

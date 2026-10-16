@@ -247,7 +247,47 @@ pub async fn list_remote_directory(
     profile_id: Option<String>,
     force_refresh: Option<bool>,
 ) -> Result<Vec<FileItem>, String> {
-    state.sftp.list_directory(&path, profile_id.as_deref(), force_refresh.unwrap_or(false)).await
+    let result = state.sftp.list_directory(&path, profile_id.as_deref(), force_refresh.unwrap_or(false)).await;
+    match result {
+        Ok(items) => Ok(items),
+        Err(err) if err.to_lowercase().contains("session closed")
+            || err.to_lowercase().contains("broken pipe")
+            || err.to_lowercase().contains("eof")
+            || err.to_lowercase().contains("channel closed")
+            || err.to_lowercase().contains("no active connection") =>
+        {
+            // Attempt seamless auto-reconnect if profile_id can be identified
+            let target_pid = profile_id.clone().or_else(|| {
+                // Try current active profile
+                None
+            });
+
+            if let Some(ref pid) = target_pid {
+                if let Ok(profiles) = state.db.list_profiles() {
+                    if let Some(p) = profiles.into_iter().find(|x| &x.id == pid) {
+                        state.logger.log("WARN", "SFTP", &format!("Session disconnected for profile '{}'. Attempting seamless auto-reconnect...", p.name)).await;
+                        let pass = CredentialManager::get_secret(pid).ok().flatten();
+                        if let Ok(_) = state.sftp.connect(
+                            Some(pid.clone()),
+                            &p.host,
+                            p.port,
+                            &p.username,
+                            &p.auth_type,
+                            pass.as_deref(),
+                            p.key_path.as_deref(),
+                            Some(&path),
+                        ).await {
+                            state.logger.log("SUCCESS", "SFTP", &format!("Auto-reconnect successful for '{}'. Re-fetching directory contents.", p.name)).await;
+                            return state.sftp.list_directory(&path, Some(pid), true).await;
+                        }
+                    }
+                }
+            }
+
+            Err(err)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 #[tauri::command]

@@ -372,7 +372,7 @@ impl SftpManager {
         }
 
         let mut config = client::Config::default();
-        config.inactivity_timeout = Some(std::time::Duration::from_secs(60));
+        config.inactivity_timeout = None; // Never drop connection due to local inactivity
         config.window_size = 8 * 1024 * 1024; // 8 MB flow control window for maximum throughput
         config.maximum_packet_size = 65536; // 64 KB packet size
         let config = Arc::new(config);
@@ -477,13 +477,14 @@ impl SftpManager {
 
         let default_dir = initial_dir.unwrap_or(".").to_string();
         let session_key = profile_id.clone().unwrap_or_else(|| format!("{}:{}", host, port));
+        let client_arc = Arc::new(raw_sftp);
 
         {
             let mut sessions = self.sessions.lock().await;
             sessions.insert(
                 session_key.clone(),
                 ActiveSftpConnection {
-                    client: Arc::new(raw_sftp),
+                    client: Arc::clone(&client_arc),
                     remote_path: default_dir.clone(),
                     profile_id: session_key.clone(),
                     host: host.to_string(),
@@ -497,7 +498,47 @@ impl SftpManager {
             *active = Some(session_key.clone());
         }
 
-        self.log("SUCCESS", "SFTP", &format!("SFTP connection established for '{session_key}'. Ready at '{default_dir}'.")).await;
+        // Spawn background keepalive heartbeat task (pings every 15s to keep connection alive when app is minimized or idle)
+        let keepalive_client = Arc::clone(&client_arc);
+        let keepalive_key = session_key.clone();
+        let sessions_ref = Arc::clone(&self.sessions);
+        let active_profile_ref = Arc::clone(&self.active_profile_id);
+        let logger_ref = Arc::clone(&self.logger);
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+            loop {
+                interval.tick().await;
+
+                // Stop keepalive if session has been explicitly closed or removed
+                {
+                    let sessions = sessions_ref.lock().await;
+                    if !sessions.contains_key(&keepalive_key) {
+                        break;
+                    }
+                }
+
+                // Send lightweight keepalive query to server to prevent idle timeout
+                if let Err(e) = keepalive_client.realpath(".").await {
+                    let err_str = e.to_string();
+                    if err_str.contains("closed") || err_str.contains("Broken pipe") || err_str.contains("eof") {
+                        let logger_opt = logger_ref.read().ok().and_then(|l| l.clone());
+                        if let Some(l) = logger_opt {
+                            l.log("WARN", "SFTP", &format!("Keepalive detected disconnected session for '{keepalive_key}'. Cleaning up.")).await;
+                        }
+                        let mut sessions = sessions_ref.lock().await;
+                        sessions.remove(&keepalive_key);
+                        let mut active = active_profile_ref.lock().await;
+                        if active.as_deref() == Some(&keepalive_key) {
+                            *active = None;
+                        }
+                        break;
+                    }
+                }
+            }
+        });
+
+        self.log("SUCCESS", "SFTP", &format!("SFTP connection established for '{session_key}'. Keepalive active. Ready at '{default_dir}'.")).await;
 
         Ok(default_dir)
     }
@@ -506,15 +547,21 @@ impl SftpManager {
         let clean_path = path.replace('\\', "/");
         let norm_path = if clean_path.is_empty() || clean_path == "." {
             "."
+        } else if clean_path == "/" {
+            "/"
         } else {
-            clean_path.trim_end_matches('/')
+            let trimmed = clean_path.trim_end_matches('/');
+            if trimmed.is_empty() { "/" } else { trimmed }
         };
 
         let (client, session_key) = self.get_client_and_key(profile_id).await?;
         let cache_key = format!("{session_key}:{norm_path}");
 
-        // Check cache if not forcing refresh
-        if !force_refresh {
+        // Check cache if not forcing refresh; if forcing refresh, ensure previous cache entry is dropped
+        if force_refresh {
+            let mut cache = self.dir_cache.lock().await;
+            cache.remove(&cache_key);
+        } else {
             let cache = self.dir_cache.lock().await;
             if let Some((timestamp, items)) = cache.get(&cache_key) {
                 if timestamp.elapsed() < std::time::Duration::from_secs(30) {
@@ -559,6 +606,8 @@ impl SftpManager {
             // Always format remote SFTP paths with Unix forward slashes (never use entry.path() which uses Windows backslashes)
             let full_path = if norm_path == "." {
                 name.clone()
+            } else if norm_path == "/" {
+                format!("/{}", name)
             } else if norm_path.ends_with('/') {
                 format!("{}{}", norm_path, name)
             } else {

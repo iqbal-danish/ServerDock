@@ -9,6 +9,7 @@ import {
   Image,
   Loader2,
   AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 import { FileItem } from "../../types";
 
@@ -23,6 +24,7 @@ interface VirtualizedFileListProps {
   onOpen: (item: FileItem) => void;
   onContextMenu: (e: React.MouseEvent, item: FileItem) => void;
   onDropFiles?: (sourcePaths: string[], isSourceRemote: boolean) => void;
+  onRetry?: () => void;
 }
 
 export const VirtualizedFileList: React.FC<VirtualizedFileListProps> = ({
@@ -36,6 +38,7 @@ export const VirtualizedFileList: React.FC<VirtualizedFileListProps> = ({
   onOpen,
   onContextMenu,
   onDropFiles,
+  onRetry,
 }) => {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -122,6 +125,15 @@ export const VirtualizedFileList: React.FC<VirtualizedFileListProps> = ({
         <span className="text-[11px] text-[#8b949e] max-w-sm text-center">
           {error}
         </span>
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="mt-3 px-3 py-1.5 rounded bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Reconnect & Retry</span>
+          </button>
+        )}
       </div>
     );
   }

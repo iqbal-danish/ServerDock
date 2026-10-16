@@ -13,8 +13,19 @@ impl Database {
         std::fs::create_dir_all(&app_data_dir).map_err(|e| e.to_string())?;
         let legacy_db = app_data_dir.join("byteflow.db");
         let db_path = app_data_dir.join("serverdock.db");
-        if legacy_db.exists() && !db_path.exists() {
-            let _ = std::fs::rename(&legacy_db, &db_path);
+
+        let legacy_bundle_db = app_data_dir
+            .parent()
+            .map(|p| p.join("com.byteflow.app").join("byteflow.db"));
+
+        if !db_path.exists() {
+            if legacy_db.exists() {
+                let _ = std::fs::copy(&legacy_db, &db_path);
+            } else if let Some(ref legacy) = legacy_bundle_db {
+                if legacy.exists() {
+                    let _ = std::fs::copy(legacy, &db_path);
+                }
+            }
         }
         let conn = Connection::open(&db_path).map_err(|e| format!("Failed to open SQLite database: {e}"))?;
 
@@ -63,6 +74,39 @@ impl Database {
             ",
         )
         .map_err(|e| format!("Failed to initialize database schema: {e}"))?;
+
+        // Fallback: If connections table is empty, check legacy sources and import
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM connections", [], |row| row.get(0))
+            .unwrap_or(0);
+        if count == 0 {
+            let mut candidates = Vec::new();
+            if legacy_db.exists() {
+                candidates.push(legacy_db);
+            }
+            if let Some(legacy) = legacy_bundle_db {
+                if legacy.exists() {
+                    candidates.push(legacy);
+                }
+            }
+            for candidate in candidates {
+                if candidate != db_path {
+                    let path_str = candidate.to_string_lossy().replace('\'', "''");
+                    if conn.execute(&format!("ATTACH DATABASE '{path_str}' AS legacy_db"), []).is_ok() {
+                        let _ = conn.execute(
+                            "INSERT OR IGNORE INTO connections SELECT * FROM legacy_db.connections",
+                            [],
+                        );
+                        let _ = conn.execute(
+                            "INSERT OR IGNORE INTO transfer_history SELECT * FROM legacy_db.transfer_history",
+                            [],
+                        );
+                        let _ = conn.execute("DETACH DATABASE legacy_db", []);
+                        break;
+                    }
+                }
+            }
+        }
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),

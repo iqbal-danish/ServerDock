@@ -314,6 +314,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({ onSwitchTab }) => {
           onForward={navigateLocalForward}
           onUp={navigateLocalUp}
           onRefresh={refreshLocal}
+          loading={localLoading}
           onCreateFolder={(name) => {
             const sep = localPath.includes("/") ? "/" : "\\";
             api.createLocalDirectory(`${localPath}${sep}${name}`).then(() => refreshLocal());
@@ -424,6 +425,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({ onSwitchTab }) => {
           onForward={navigateRemoteForward}
           onUp={navigateRemoteUp}
           onRefresh={refreshRemote}
+          loading={remoteLoading}
           onCreateFolder={(name) => {
             const dest = remotePath.endsWith("/") ? `${remotePath}${name}` : `${remotePath}/${name}`;
             api.createRemoteDirectory(dest, activeProfileId || undefined).then(() => refreshRemote());
@@ -458,6 +460,7 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({ onSwitchTab }) => {
               setContextMenu({ x: e.clientX, y: e.clientY, item, isRemote: true });
             }}
             onDropFiles={handleDropToRemote}
+            onRetry={refreshRemote}
           />
         )}
 
